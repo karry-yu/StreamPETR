@@ -4,23 +4,17 @@
 #  Modified by Zhiqi Li
 # ---------------------------------------------
 import os.path as osp
-import pickle
 import shutil
 import tempfile
 import time
 
 import mmcv
-import torch
-import torch.distributed as dist
-from mmcv.image import tensor2imgs
-from mmcv.runner import get_dist_info
-
-from mmdet.core import encode_mask_results
-
-
-import mmcv
 import numpy as np
 import pycocotools.mask as mask_util
+import torch
+import torch.distributed as dist
+from mmcv.runner import get_dist_info
+
 
 def custom_encode_mask_results(mask_results):
     """Encode bitmap mask to RLE code. Semantic Masks only
@@ -39,8 +33,9 @@ def custom_encode_mask_results(mask_results):
             mask_util.encode(
                 np.array(
                     cls_segms[i][:, :, np.newaxis], order='F',
-                        dtype='uint8'))[0])  # encoded with RLE
+                    dtype='uint8'))[0])  # encoded with RLE
     return [encoded_mask_results]
+
 
 def custom_multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
     """Test model with multiple gpus.
@@ -84,12 +79,12 @@ def custom_multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
                 batch_size = len(result)
                 bbox_results.extend(result)
 
-            #if isinstance(result[0], tuple):
+            # if isinstance(result[0], tuple):
             #    assert False, 'this code is for instance segmentation, which our code will not utilize.'
             #    result = [(bbox_results, encode_mask_results(mask_results))
             #              for bbox_results, mask_results in result]
         if rank == 0:
-            
+
             for _ in range(batch_size * world_size):
                 prog_bar.update()
 
@@ -102,7 +97,7 @@ def custom_multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
             mask_results = None
     else:
         bbox_results = collect_results_cpu(bbox_results, len(dataset), tmpdir)
-        tmpdir = tmpdir+'_mask' if tmpdir is not None else None
+        tmpdir = tmpdir + '_mask' if tmpdir is not None else None
         if have_mask:
             mask_results = collect_results_cpu(mask_results, len(dataset), tmpdir)
         else:
@@ -119,7 +114,7 @@ def collect_results_cpu(result_part, size, tmpdir=None):
     if tmpdir is None:
         MAX_LEN = 512
         # 32 is whitespace
-        dir_tensor = torch.full((MAX_LEN, ),
+        dir_tensor = torch.full((MAX_LEN,),
                                 32,
                                 dtype=torch.uint8,
                                 device='cuda')
@@ -150,8 +145,8 @@ def collect_results_cpu(result_part, size, tmpdir=None):
         '''
         bacause we change the sample of the evaluation stage to make sure that each gpu will handle continuous sample,
         '''
-        #for res in zip(*part_list):
-        for res in part_list:  
+        # for res in zip(*part_list):
+        for res in part_list:
             ordered_results.extend(list(res))
         # the dataloader may pad some samples
         ordered_results = ordered_results[:size]

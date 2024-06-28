@@ -5,11 +5,12 @@
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
 import numpy as np
-from mmdet.datasets.builder import PIPELINES
 from mmcv.parallel import DataContainer as DC
-from mmdet3d.core.points import BasePoints
+from mmdet.datasets.builder import PIPELINES
 from mmdet.datasets.pipelines import to_tensor
+from mmdet3d.core.points import BasePoints
 from mmdet3d.datasets.pipelines import DefaultFormatBundle
+
 
 @PIPELINES.register_module()
 class PETRFormatBundle3D(DefaultFormatBundle):
@@ -33,6 +34,7 @@ class PETRFormatBundle3D(DefaultFormatBundle):
         self.with_gt = with_gt
         self.with_label = with_label
         self.collect_keys = collect_keys
+
     def __call__(self, results):
         """Call function to transform and format common fields in results.
 
@@ -49,10 +51,10 @@ class PETRFormatBundle3D(DefaultFormatBundle):
             results['points'] = DC(results['points'].tensor)
 
         for key in self.collect_keys:
-            if key in ['timestamp',  'img_timestamp']:
-                 results[key] = DC(to_tensor(np.array(results[key], dtype=np.float64)))
+            if key in ['timestamp', 'img_timestamp']:
+                results[key] = DC(to_tensor(np.array(results[key], dtype=np.float64)))
             else:
-                 results[key] = DC(to_tensor(np.array(results[key], dtype=np.float32)))
+                results[key] = DC(to_tensor(np.array(results[key], dtype=np.float32)))
 
         for key in ['voxels', 'coors', 'voxel_centers', 'num_points']:
             if key not in results:
@@ -93,7 +95,7 @@ class PETRFormatBundle3D(DefaultFormatBundle):
                     results['gt_labels'] = np.array([
                         self.class_names.index(n) for n in results['gt_names']
                     ],
-                                                    dtype=np.int64)
+                        dtype=np.int64)
                 # we still assume one pipeline for one frame LiDAR
                 # thus, the 3D name is list[string]
                 if 'gt_names_3d' in results:
@@ -101,7 +103,7 @@ class PETRFormatBundle3D(DefaultFormatBundle):
                         self.class_names.index(n)
                         for n in results['gt_names_3d']
                     ],
-                                                       dtype=np.int64)
+                        dtype=np.int64)
         results = super(PETRFormatBundle3D, self).__call__(results)
         return results
 

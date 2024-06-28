@@ -1,21 +1,24 @@
+import logging
+import math
+import warnings
+from functools import partial
+from math import pi
+
 import fvcore.nn.weight_init as weight_init
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import numpy as np
-import logging
-from functools import partial
-from scipy import interpolate
-from math import pi
-from einops import rearrange, repeat
-import warnings
 import torch.utils.checkpoint as cp
-from ..utils.attention import FlashAttention, FlashMHA
+from einops import rearrange, repeat
 from mmdet.models.builder import BACKBONES
+from scipy import interpolate
+
+from ..utils.attention import FlashAttention
 
 logger = logging.getLogger(__name__)
 BatchNorm2d = torch.nn.BatchNorm2d
+
 
 class Conv2d(torch.nn.Conv2d):
     """
@@ -193,7 +196,7 @@ def add_decomposed_rel_pos(attn, q, rel_pos_h, rel_pos_w, q_size, k_size):
     rel_w = torch.einsum("bhwc,wkc->bhwk", r_q, Rw)
 
     attn = (
-        attn.view(B, q_h, q_w, k_h, k_w) + rel_h[:, :, :, :, None] + rel_w[:, :, :, None, :]
+            attn.view(B, q_h, q_w, k_h, k_w) + rel_h[:, :, :, :, None] + rel_w[:, :, :, None, :]
     ).view(B, q_h * q_w, k_h * k_w)
 
     return attn
@@ -220,7 +223,7 @@ def get_abs_pos(abs_pos, has_cls_token, hw):
     if size != h or size != w:
         original_datatype = abs_pos.dtype
         new_abs_pos = F.interpolate(
-            abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2).float(), # bf16 is not implemented
+            abs_pos.reshape(1, size, size, -1).permute(0, 3, 1, 2).float(),  # bf16 is not implemented
             size=(h, w),
             mode="bicubic",
             align_corners=False,
@@ -237,7 +240,7 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(
-        self, kernel_size=(16, 16), stride=(16, 16), padding=(0, 0), in_chans=3, embed_dim=768
+            self, kernel_size=(16, 16), stride=(16, 16), padding=(0, 0), in_chans=3, embed_dim=768
     ):
         """
         Args:
@@ -258,9 +261,9 @@ class PatchEmbed(nn.Module):
         # B C H W -> B H W C
         x = x.permute(0, 2, 3, 1)
         return x
-    
 
-def broadcat(tensors, dim = -1):
+
+def broadcat(tensors, dim=-1):
     num_tensors = len(tensors)
     shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
     assert len(shape_lens) == 1, 'tensors must all have the same number of dimensions'
@@ -268,35 +271,34 @@ def broadcat(tensors, dim = -1):
     dim = (dim + shape_len) if dim < 0 else dim
     dims = list(zip(*map(lambda t: list(t.shape), tensors)))
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), 'invalid dimensions for broadcastable concatentation'
+    assert all(
+        [*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), 'invalid dimensions for broadcastable concatentation'
     max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
     expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_tensors), max_dims))
     expanded_dims.insert(dim, (dim, dims[dim]))
     expandable_shapes = list(zip(*map(lambda t: t[1], expanded_dims)))
     tensors = list(map(lambda t: t[0].expand(*t[1]), zip(tensors, expandable_shapes)))
-    return torch.cat(tensors, dim = dim)
-
+    return torch.cat(tensors, dim=dim)
 
 
 def rotate_half(x):
-    x = rearrange(x, '... (d r) -> ... d r', r = 2)
-    x1, x2 = x.unbind(dim = -1)
-    x = torch.stack((-x2, x1), dim = -1)
+    x = rearrange(x, '... (d r) -> ... d r', r=2)
+    x1, x2 = x.unbind(dim=-1)
+    x = torch.stack((-x2, x1), dim=-1)
     return rearrange(x, '... d r -> ... (d r)')
-
 
 
 class VisionRotaryEmbedding(nn.Module):
     def __init__(
-        self,
-        dim,
-        pt_seq_len,
-        ft_seq_len=None,
-        custom_freqs = None,
-        freqs_for = 'lang',
-        theta = 10000,
-        max_freq = 10,
-        num_freqs = 1,
+            self,
+            dim,
+            pt_seq_len,
+            ft_seq_len=None,
+            custom_freqs=None,
+            freqs_for='lang',
+            theta=10000,
+            max_freq=10,
+            num_freqs=1,
     ):
         super().__init__()
         if custom_freqs:
@@ -314,40 +316,39 @@ class VisionRotaryEmbedding(nn.Module):
         t = torch.arange(ft_seq_len) / ft_seq_len * pt_seq_len
 
         freqs_h = torch.einsum('..., f -> ... f', t, freqs)
-        freqs_h = repeat(freqs_h, '... n -> ... (n r)', r = 2)
+        freqs_h = repeat(freqs_h, '... n -> ... (n r)', r=2)
 
         freqs_w = torch.einsum('..., f -> ... f', t, freqs)
-        freqs_w = repeat(freqs_w, '... n -> ... (n r)', r = 2)
+        freqs_w = repeat(freqs_w, '... n -> ... (n r)', r=2)
 
-        freqs = broadcat((freqs_h[:, None, :], freqs_w[None, :, :]), dim = -1)
+        freqs = broadcat((freqs_h[:, None, :], freqs_w[None, :, :]), dim=-1)
 
         self.register_buffer("freqs_cos", freqs.cos())
         self.register_buffer("freqs_sin", freqs.sin())
 
         print('======== shape of rope freq', self.freqs_cos.shape, '========')
 
-    def forward(self, t, start_index = 0):
+    def forward(self, t, start_index=0):
         rot_dim = self.freqs_cos.shape[-1]
         end_index = start_index + rot_dim
-        assert rot_dim <= t.shape[-1], f'feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}'
+        assert rot_dim <= t.shape[
+            -1], f'feature dimension {t.shape[-1]} is not of sufficient size to rotate in all the positions {rot_dim}'
         t_left, t, t_right = t[..., :start_index], t[..., start_index:end_index], t[..., end_index:]
         t = (t * self.freqs_cos) + (rotate_half(t) * self.freqs_sin)
-        return torch.cat((t_left, t, t_right), dim = -1)
-
-
+        return torch.cat((t_left, t, t_right), dim=-1)
 
 
 class VisionRotaryEmbeddingFast(nn.Module):
     def __init__(
-        self,
-        dim,
-        pt_seq_len=16,
-        ft_seq_len=None,
-        custom_freqs = None,
-        freqs_for = 'lang',
-        theta = 10000,
-        max_freq = 10,
-        num_freqs = 1,
+            self,
+            dim,
+            pt_seq_len=16,
+            ft_seq_len=None,
+            custom_freqs=None,
+            freqs_for='lang',
+            theta=10000,
+            max_freq=10,
+            num_freqs=1,
     ):
         super().__init__()
         if custom_freqs:
@@ -365,8 +366,8 @@ class VisionRotaryEmbeddingFast(nn.Module):
         t = torch.arange(ft_seq_len) / ft_seq_len * pt_seq_len
 
         freqs = torch.einsum('..., f -> ... f', t, freqs)
-        freqs = repeat(freqs, '... n -> ... (n r)', r = 2)
-        freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim = -1)
+        freqs = repeat(freqs, '... n -> ... (n r)', r=2)
+        freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim=-1)
 
         freqs_cos = freqs.cos().view(-1, freqs.shape[-1])
         freqs_sin = freqs.sin().view(-1, freqs.shape[-1])
@@ -376,7 +377,8 @@ class VisionRotaryEmbeddingFast(nn.Module):
 
         print('======== shape of rope freq', self.freqs_cos.shape, '========')
 
-    def forward(self, t): return  t * self.freqs_cos + rotate_half(t) * self.freqs_sin
+    def forward(self, t):
+        return t * self.freqs_cos + rotate_half(t) * self.freqs_sin
 
 
 class FrozenBatchNorm2d(nn.Module):
@@ -430,7 +432,7 @@ class FrozenBatchNorm2d(nn.Module):
             )
 
     def _load_from_state_dict(
-        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+            self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
     ):
         version = local_metadata.get("version", None)
 
@@ -478,6 +480,7 @@ class FrozenBatchNorm2d(nn.Module):
                 if new_child is not child:
                     res.add_module(name, new_child)
         return res
+
 
 class LayerNorm(nn.Module):
     """
@@ -540,6 +543,7 @@ class CNNBlockBase(nn.Module):
         FrozenBatchNorm2d.convert_frozen_batchnorm(self)
         return self
 
+
 def get_norm(norm, out_channels):
     """
     Args:
@@ -566,6 +570,7 @@ def get_norm(norm, out_channels):
         }[norm]
     return norm(out_channels)
 
+
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
     """
@@ -581,17 +586,16 @@ class DropPath(nn.Module):
         # work with diff dim tensors, not just 2D ConvNets
         shape = (x.shape[0],) + (1,) * (x.ndim - 1)
         random_tensor = keep_prob + \
-            torch.rand(shape, dtype=x.dtype, device=x.device)
+                        torch.rand(shape, dtype=x.dtype, device=x.device)
         random_tensor.floor_()  # binarize
         output = x.div(keep_prob) * random_tensor
         return output
 
 
-
 class SwiGLU(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.SiLU, drop=0., 
-                norm_layer=nn.LayerNorm, subln=False
-            ):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.SiLU, drop=0.,
+                 norm_layer=nn.LayerNorm, subln=False
+                 ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -602,7 +606,7 @@ class SwiGLU(nn.Module):
         self.act = act_layer()
         self.ffn_ln = norm_layer(hidden_features) if subln else nn.Identity()
         self.w3 = nn.Linear(hidden_features, out_features)
-        
+
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
@@ -613,21 +617,21 @@ class SwiGLU(nn.Module):
         x = self.w3(x)
         x = self.drop(x)
         return x
-    
+
 
 class Attention(nn.Module):
     def __init__(
-            self, 
-            dim, 
-            num_heads=8, 
-            qkv_bias=True, 
-            qk_scale=None, 
-            attn_head_dim=None, 
+            self,
+            dim,
+            num_heads=8,
+            qkv_bias=True,
+            qk_scale=None,
+            attn_head_dim=None,
             norm_layer=nn.LayerNorm,
             rope=None,
             flash_attn=True,
             subln=False
-        ):
+    ):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -666,16 +670,16 @@ class Attention(nn.Module):
         k = F.linear(input=x, weight=self.k_proj.weight, bias=None)
         v = F.linear(input=x, weight=self.v_proj.weight, bias=self.v_bias)
 
-        q = q.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3)     # B, num_heads, N, C
-        k = k.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3)  
-        v = v.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3) 
+        q = q.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3)  # B, num_heads, N, C
+        k = k.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3)
+        v = v.reshape(B, N, self.num_heads, -1).permute(0, 2, 1, 3)
 
         ## rope
         q = self.rope(q).type_as(v)
         k = self.rope(k).type_as(v)
 
         if self.flash_attn:
-            q = q.permute(0, 2, 1, 3)   # B, num_heads, N, C -> B, N, num_heads, C
+            q = q.permute(0, 2, 1, 3)  # B, num_heads, N, C -> B, N, num_heads, C
             k = k.permute(0, 2, 1, 3)
             v = v.permute(0, 2, 1, 3)
 
@@ -704,12 +708,12 @@ class ResBottleneckBlock(CNNBlockBase):
     """
 
     def __init__(
-        self,
-        in_channels,
-        out_channels,
-        bottleneck_channels,
-        norm="LN",
-        act_layer=nn.GELU,
+            self,
+            in_channels,
+            out_channels,
+            bottleneck_channels,
+            norm="LN",
+            act_layer=nn.GELU,
     ):
         """
         Args:
@@ -762,19 +766,19 @@ class Block(nn.Module):
     """Transformer blocks with support of window attention and residual propagation blocks"""
 
     def __init__(
-        self,
-        dim,
-        num_heads,
-        mlp_ratio=4*2/3,
-        qkv_bias=True,
-        drop_path=0.0,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), 
-        window_size=0,
-        use_residual_block=False,
-        rope=None,
-        flash_attn=True,
-        subln=False,
-        with_cp=True,
+            self,
+            dim,
+            num_heads,
+            mlp_ratio=4 * 2 / 3,
+            qkv_bias=True,
+            drop_path=0.0,
+            norm_layer=partial(nn.LayerNorm, eps=1e-6),
+            window_size=0,
+            use_residual_block=False,
+            rope=None,
+            flash_attn=True,
+            subln=False,
+            with_cp=True,
     ):
         """
         Args:
@@ -804,16 +808,15 @@ class Block(nn.Module):
             subln=subln
         )
 
-        
         self.with_cp = with_cp
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         self.mlp = SwiGLU(
-                in_features=dim, 
-                hidden_features=int(dim * mlp_ratio), 
-                subln=True,
-                norm_layer=norm_layer,
-            )
+            in_features=dim,
+            hidden_features=int(dim * mlp_ratio),
+            subln=True,
+            norm_layer=norm_layer,
+        )
 
         self.window_size = window_size
 
@@ -857,6 +860,7 @@ class Block(nn.Module):
             x = self._forward(x)
         return x
 
+
 @BACKBONES.register_module()
 class EVAViT(nn.Module):
     """
@@ -866,35 +870,35 @@ class EVAViT(nn.Module):
     """
 
     def __init__(
-        self,
-        img_size=1024,
-        patch_size=16,
-        in_chans=3,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        mlp_ratio=4*2/3,
-        qkv_bias=True,
-        drop_path_rate=0.0,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        act_layer=nn.GELU,
-        use_abs_pos=True,
-        use_rel_pos=False,
-        sim_fpn=None,
-        rope=True,
-        pt_hw_seq_len=16,
-        intp_freq=True,
-        window_size=0,
-        global_window_size=0,
-        window_block_indexes=(),
-        residual_block_indexes=(),
-        pretrain_img_size=224,
-        pretrain_use_cls_token=True,
-        out_feature="last_feat",
-        subln=False,
-        flash_attn=True,
-        with_cp=True,
-        frozen=False,
+            self,
+            img_size=1024,
+            patch_size=16,
+            in_chans=3,
+            embed_dim=768,
+            depth=12,
+            num_heads=12,
+            mlp_ratio=4 * 2 / 3,
+            qkv_bias=True,
+            drop_path_rate=0.0,
+            norm_layer=partial(nn.LayerNorm, eps=1e-6),
+            act_layer=nn.GELU,
+            use_abs_pos=True,
+            use_rel_pos=False,
+            sim_fpn=None,
+            rope=True,
+            pt_hw_seq_len=16,
+            intp_freq=True,
+            window_size=0,
+            global_window_size=0,
+            window_block_indexes=(),
+            residual_block_indexes=(),
+            pretrain_img_size=224,
+            pretrain_use_cls_token=True,
+            out_feature="last_feat",
+            subln=False,
+            flash_attn=True,
+            with_cp=True,
+            frozen=False,
     ):
         """
         Args:
@@ -981,7 +985,7 @@ class EVAViT(nn.Module):
         self.adapter = None
         if sim_fpn is not None:
             self.adapter = SimpleFeaturePyramid(**sim_fpn)
-            
+
         if self.pos_embed is not None:
             nn.init.normal_(self.pos_embed, std=0.02)
 
@@ -989,14 +993,13 @@ class EVAViT(nn.Module):
         # **However, they will cause problems (deepspeed + bf16)**
         # self.apply(self._init_weights)
         self._freeze_stages()
-                    
 
     def _freeze_stages(self):
         if self.frozen:
             self.eval()
             for m in self.parameters():
                 m.requires_grad = False
-            
+
     def forward(self, x, img_metas=None):
         x = self.patch_embed(x)
         if self.pos_embed is not None:
@@ -1005,8 +1008,8 @@ class EVAViT(nn.Module):
             )
 
         for blk in self.blocks:
-            x = blk(x)   # b, h, w, c
-        x = x.permute(0, 3, 1, 2) # b, c, h, w 
+            x = blk(x)  # b, h, w, c
+        x = x.permute(0, 3, 1, 2)  # b, c, h, w
 
         if self.adapter is not None:
             outputs = self.adapter(x)
@@ -1023,14 +1026,14 @@ class SimpleFeaturePyramid(nn.Module):
     """
 
     def __init__(
-        self,
-        scale_factors=[4, 2, 1, 0.5],
-        in_channels=1024,
-        out_channels=256,
-        top_block=None,
-        out_indices=[2, 3, 4, 5],
-        norm="LN",
-        square_pad=0,
+            self,
+            scale_factors=[4, 2, 1, 0.5],
+            in_channels=1024,
+            out_channels=256,
+            top_block=None,
+            out_indices=[2, 3, 4, 5],
+            norm="LN",
+            square_pad=0,
     ):
         """
         Args:

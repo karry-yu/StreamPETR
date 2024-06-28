@@ -8,13 +8,13 @@
 # Copyright 2021 Toyota Research Institute.  All rights reserved.
 # ------------------------------------------------------------------------
 from collections import OrderedDict
-from mmcv.runner import BaseModule
-from mmdet.models.builder import BACKBONES
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from mmcv.runner import BaseModule
+from mmdet.models.builder import BACKBONES
 from torch.nn.modules.batchnorm import _BatchNorm
-
 
 VoVNet19_slim_dw_eSE = {
     'stem': [64, 64, 64],
@@ -187,7 +187,7 @@ class eSEModule(nn.Module):
 
 class _OSA_module(nn.Module):
     def __init__(
-        self, in_ch, stage_ch, concat_ch, layer_per_block, module_name, SE=False, identity=False, depthwise=False
+            self, in_ch, stage_ch, concat_ch, layer_per_block, module_name, SE=False, identity=False, depthwise=False
     ):
 
         super(_OSA_module, self).__init__()
@@ -240,7 +240,7 @@ class _OSA_module(nn.Module):
 
 class _OSA_stage(nn.Sequential):
     def __init__(
-        self, in_ch, stage_ch, concat_ch, block_per_stage, layer_per_block, stage_num, SE=False, depthwise=False
+            self, in_ch, stage_ch, concat_ch, block_per_stage, layer_per_block, stage_num, SE=False, depthwise=False
     ):
 
         super(_OSA_stage, self).__init__()
@@ -275,7 +275,7 @@ class _OSA_stage(nn.Sequential):
 
 @BACKBONES.register_module()
 class VoVNet(BaseModule):
-    def __init__(self, spec_name, input_ch=3, out_features=None, 
+    def __init__(self, spec_name, input_ch=3, out_features=None,
                  frozen_stages=-1, norm_eval=True, pretrained=None, init_cfg=None):
         """
         Args:
@@ -366,7 +366,7 @@ class VoVNet(BaseModule):
                 param.requires_grad = False
 
         for i in range(1, self.frozen_stages + 1):
-            m = getattr(self, f'stage{i+1}')
+            m = getattr(self, f'stage{i + 1}')
             m.eval()
             for param in m.parameters():
                 param.requires_grad = False

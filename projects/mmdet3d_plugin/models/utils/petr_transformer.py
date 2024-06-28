@@ -9,27 +9,28 @@
 # ------------------------------------------------------------------------
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
+import copy
 import warnings
+
 import torch
 import torch.nn as nn
-from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
-                                         TransformerLayerSequence,
+import torch.utils.checkpoint as cp
+from mmcv.cnn import build_norm_layer, xavier_init
+from mmcv.cnn.bricks.drop import build_dropout
+from mmcv.cnn.bricks.registry import (ATTENTION, TRANSFORMER_LAYER,
+                                      TRANSFORMER_LAYER_SEQUENCE)
+from mmcv.cnn.bricks.transformer import (TransformerLayerSequence,
                                          build_transformer_layer_sequence,
                                          build_attention,
                                          build_feedforward_network)
-from mmcv.cnn.bricks.drop import build_dropout
-from mmdet.models.utils.builder import TRANSFORMER
-from mmcv.cnn import build_norm_layer, xavier_init
-from mmcv.runner.base_module import BaseModule
-from mmcv.cnn.bricks.registry import (ATTENTION,TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.utils import deprecated_api_warning, ConfigDict
-import copy
-from torch.nn import ModuleList
-from .attention import FlashMHA
-import torch.utils.checkpoint as cp
-
 from mmcv.runner import auto_fp16
+from mmcv.runner.base_module import BaseModule
+from mmcv.utils import deprecated_api_warning, ConfigDict
+from mmdet.models.utils.builder import TRANSFORMER
+from torch.nn import ModuleList
+
+from .attention import FlashMHA
+
 
 @ATTENTION.register_module()
 class PETRMultiheadFlashAttention(BaseModule):
@@ -76,7 +77,7 @@ class PETRMultiheadFlashAttention(BaseModule):
         self.batch_first = True
 
         self.attn = FlashMHA(embed_dims, num_heads, attn_drop, dtype=torch.float16, device='cuda',
-                                          **kwargs)
+                             **kwargs)
 
         self.proj_drop = nn.Dropout(proj_drop)
         self.dropout_layer = build_dropout(
@@ -160,7 +161,7 @@ class PETRMultiheadFlashAttention(BaseModule):
             query = query.transpose(0, 1)
             key = key.transpose(0, 1)
             value = value.transpose(0, 1)
-        
+
         out = self.attn(
             q=query,
             k=key,
@@ -184,12 +185,13 @@ class MultiheadAttentionWrapper(nn.MultiheadAttention):
 
     def forward_fp32(self, *args, **kwargs):
         return super(MultiheadAttentionWrapper, self).forward(*args, **kwargs)
-    
+
     def forward(self, *args, **kwargs):
         if self.training:
             return self.forward_fp16(*args, **kwargs)
         else:
-            return self.forward_fp32( *args, **kwargs)
+            return self.forward_fp32(*args, **kwargs)
+
 
 @ATTENTION.register_module()
 class PETRMultiheadAttention(BaseModule):
@@ -220,7 +222,7 @@ class PETRMultiheadAttention(BaseModule):
                  dropout_layer=dict(type='Dropout', drop_prob=0.),
                  init_cfg=None,
                  batch_first=False,
-                 fp16 = False,
+                 fp16=False,
                  **kwargs):
         super(PETRMultiheadAttention, self).__init__(init_cfg)
         if 'dropout' in kwargs:
@@ -237,9 +239,9 @@ class PETRMultiheadAttention(BaseModule):
         self.batch_first = batch_first
         self.fp16_enabled = True
         if fp16:
-            self.attn = MultiheadAttentionWrapper(embed_dims, num_heads, attn_drop,  **kwargs)
+            self.attn = MultiheadAttentionWrapper(embed_dims, num_heads, attn_drop, **kwargs)
         else:
-            self.attn = nn.MultiheadAttention(embed_dims, num_heads, attn_drop,  **kwargs)
+            self.attn = nn.MultiheadAttention(embed_dims, num_heads, attn_drop, **kwargs)
 
         self.proj_drop = nn.Dropout(proj_drop)
         self.dropout_layer = build_dropout(
@@ -337,7 +339,6 @@ class PETRMultiheadAttention(BaseModule):
         return identity + self.dropout_layer(self.proj_drop(out))
 
 
-
 @TRANSFORMER_LAYER_SEQUENCE.register_module()
 class PETRTransformerEncoder(TransformerLayerSequence):
     """TransformerEncoder of DETR.
@@ -418,7 +419,6 @@ class PETRTransformerDecoder(TransformerLayerSequence):
         return torch.stack(intermediate)
 
 
-
 @TRANSFORMER.register_module()
 class PETRTemporalTransformer(BaseModule):
     """Implements the DETR transformer.
@@ -455,8 +455,8 @@ class PETRTemporalTransformer(BaseModule):
                 xavier_init(m, distribution='uniform')
         self._is_init = True
 
-
-    def forward(self, memory, tgt, query_pos, pos_embed, attn_masks, temp_memory=None, temp_pos=None, mask=None, reg_branch=None):
+    def forward(self, memory, tgt, query_pos, pos_embed, attn_masks, temp_memory=None, temp_pos=None, mask=None,
+                reg_branch=None):
         """Forward function for `Transformer`.
         Args:
             x (Tensor): Input query with shape [bs, c, h, w] where
@@ -479,7 +479,7 @@ class PETRTemporalTransformer(BaseModule):
         memory = memory.transpose(0, 1).contiguous()
         query_pos = query_pos.transpose(0, 1).contiguous()
         pos_embed = pos_embed.transpose(0, 1).contiguous()
-        
+
         n, bs, c = memory.shape
 
         if tgt is None:
@@ -489,7 +489,7 @@ class PETRTemporalTransformer(BaseModule):
 
         if temp_memory is not None:
             temp_memory = temp_memory.transpose(0, 1).contiguous()
-            temp_pos =  temp_pos.transpose(0, 1).contiguous()
+            temp_pos = temp_pos.transpose(0, 1).contiguous()
 
         # out_dec: [num_layers, num_query, bs, dim]
         out_dec = self.decoder(
@@ -503,10 +503,10 @@ class PETRTemporalTransformer(BaseModule):
             key_padding_mask=mask,
             attn_masks=[attn_masks, None],
             reg_branch=reg_branch,
-            )
+        )
         out_dec = out_dec.transpose(1, 2).contiguous()
         memory = memory.reshape(-1, bs, c).transpose(0, 1).contiguous()
-        return  out_dec, memory
+        return out_dec, memory
 
 
 @TRANSFORMER_LAYER.register_module()
@@ -582,10 +582,10 @@ class PETRTemporalDecoderLayer(BaseModule):
 
         assert set(operation_order) & {
             'self_attn', 'norm', 'ffn', 'cross_attn'} == \
-            set(operation_order), f'The operation_order of' \
-            f' {self.__class__.__name__} should ' \
-            f'contains all four operation type ' \
-            f"{['self_attn', 'norm', 'ffn', 'cross_attn']}"
+               set(operation_order), f'The operation_order of' \
+                                     f' {self.__class__.__name__} should ' \
+                                     f'contains all four operation type ' \
+                                     f"{['self_attn', 'norm', 'ffn', 'cross_attn']}"
 
         num_attn = operation_order.count('self_attn') + operation_order.count(
             'cross_attn')
@@ -593,9 +593,9 @@ class PETRTemporalDecoderLayer(BaseModule):
             attn_cfgs = [copy.deepcopy(attn_cfgs) for _ in range(num_attn)]
         else:
             assert num_attn == len(attn_cfgs), f'The length ' \
-                f'of attn_cfg {num_attn} is ' \
-                f'not consistent with the number of attention' \
-                f'in operation_order {operation_order}.'
+                                               f'of attn_cfg {num_attn} is ' \
+                                               f'not consistent with the number of attention' \
+                                               f'in operation_order {operation_order}.'
 
         self.num_attn = num_attn
         self.operation_order = operation_order
@@ -643,17 +643,17 @@ class PETRTemporalDecoderLayer(BaseModule):
         self.use_checkpoint = with_cp
 
     def _forward(self,
-                query,
-                key=None,
-                value=None,
-                query_pos=None,
-                key_pos=None,
-                temp_memory=None,
-                temp_pos=None,
-                attn_masks=None,
-                query_key_padding_mask=None,
-                key_padding_mask=None,
-                **kwargs):
+                 query,
+                 key=None,
+                 value=None,
+                 query_pos=None,
+                 key_pos=None,
+                 temp_memory=None,
+                 temp_pos=None,
+                 attn_masks=None,
+                 query_key_padding_mask=None,
+                 key_padding_mask=None,
+                 **kwargs):
         """Forward function for `TransformerDecoderLayer`.
 
         **kwargs contains some specific arguments of attentions.
@@ -699,9 +699,9 @@ class PETRTemporalDecoderLayer(BaseModule):
                           f'{self.__class__.__name__} ')
         else:
             assert len(attn_masks) == self.num_attn, f'The length of ' \
-                        f'attn_masks {len(attn_masks)} must be equal ' \
-                        f'to the number of attention in ' \
-                        f'operation_order {self.num_attn}'
+                                                     f'attn_masks {len(attn_masks)} must be equal ' \
+                                                     f'to the number of attention in ' \
+                                                     f'operation_order {self.num_attn}'
 
         for layer in self.operation_order:
             if layer == 'self_attn':
@@ -749,7 +749,7 @@ class PETRTemporalDecoderLayer(BaseModule):
 
         return query
 
-    def forward(self, 
+    def forward(self,
                 query,
                 key=None,
                 value=None,
@@ -769,7 +769,7 @@ class PETRTemporalDecoderLayer(BaseModule):
 
         if self.use_checkpoint and self.training:
             x = cp.checkpoint(
-                self._forward, 
+                self._forward,
                 query,
                 key,
                 value,
@@ -780,19 +780,18 @@ class PETRTemporalDecoderLayer(BaseModule):
                 attn_masks,
                 query_key_padding_mask,
                 key_padding_mask,
-                )
+            )
         else:
             x = self._forward(
-            query,
-            key,
-            value,
-            query_pos,
-            key_pos,
-            temp_memory,
-            temp_pos,
-            attn_masks,
-            query_key_padding_mask,
-            key_padding_mask,
-        )
+                query,
+                key,
+                value,
+                query_pos,
+                key_pos,
+                temp_memory,
+                temp_pos,
+                attn_masks,
+                query_key_padding_mask,
+                key_padding_mask,
+            )
         return x
-

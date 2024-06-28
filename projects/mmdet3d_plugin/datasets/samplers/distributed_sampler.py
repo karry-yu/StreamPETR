@@ -6,8 +6,10 @@
 #  Modified by Shihao Wang
 # ---------------------------------------------
 import math
+
 import torch
 from torch.utils.data import DistributedSampler as _DistributedSampler
+
 from .sampler import SAMPLER
 
 
@@ -39,9 +41,9 @@ class DistributedSampler(_DistributedSampler):
         assert len(indices) == self.total_size
 
         # subsample
-        per_replicas = self.total_size//self.num_replicas
+        per_replicas = self.total_size // self.num_replicas
         # indices = indices[self.rank:self.total_size:self.num_replicas]
-        indices = indices[self.rank*per_replicas:(self.rank+1)*per_replicas]
+        indices = indices[self.rank * per_replicas:(self.rank + 1) * per_replicas]
         assert len(indices) == self.num_samples
 
         return iter(indices)

@@ -10,11 +10,11 @@
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
 
-import numpy as np
 import mmcv
-from mmdet.datasets.builder import PIPELINES
+import numpy as np
 import torch
 from PIL import Image
+from mmdet.datasets.builder import PIPELINES
 
 
 @PIPELINES.register_module()
@@ -28,27 +28,28 @@ class PadMultiViewImage():
         size_divisor (int, optional): The divisor of padded size.
         pad_val (float, optional): Padding value, 0 by default.
     """
+
     def __init__(self, size=None, size_divisor=None, pad_val=0):
         self.size = size
         self.size_divisor = size_divisor
         self.pad_val = pad_val
         assert size is not None or size_divisor is not None
         assert size_divisor is None or size is None
-    
+
     def _pad_img(self, results):
         """Pad images according to ``self.size``."""
         if self.size is not None:
             padded_img = [mmcv.impad(img,
-                                shape = self.size, pad_val=self.pad_val) for img in results['img']]
+                                     shape=self.size, pad_val=self.pad_val) for img in results['img']]
         elif self.size_divisor is not None:
             padded_img = [mmcv.impad_to_multiple(img,
-                                self.size_divisor, pad_val=self.pad_val) for img in results['img']]
+                                                 self.size_divisor, pad_val=self.pad_val) for img in results['img']]
         results['img_shape'] = [img.shape for img in results['img']]
         results['img'] = padded_img
         results['pad_shape'] = [img.shape for img in padded_img]
         results['pad_fix_size'] = self.size
         results['pad_size_divisor'] = self.size_divisor
-    
+
     def __call__(self, results):
         """Call function to pad images, masks, semantic segmentation maps.
         Args:
@@ -58,7 +59,6 @@ class PadMultiViewImage():
         """
         self._pad_img(results)
         return results
-
 
     def __repr__(self):
         repr_str = self.__class__.__name__
@@ -126,7 +126,6 @@ class ResizeCropFlipRotImage():
 
         resize, resize_dims, crop, flip, rotate = self._sample_augmentation()
 
-
         for i in range(N):
             img = Image.fromarray(np.uint8(imgs[i]))
             img, ida_mat = self._img_transform(
@@ -137,14 +136,14 @@ class ResizeCropFlipRotImage():
                 flip=flip,
                 rotate=rotate,
             )
-            if self.training and self.with_2d: # sync_2d bbox labels
+            if self.training and self.with_2d:  # sync_2d bbox labels
                 gt_bboxes = results['gt_bboxes'][i]
                 centers2d = results['centers2d'][i]
                 gt_labels = results['gt_labels'][i]
                 depths = results['depths'][i]
                 if len(gt_bboxes) != 0:
                     gt_bboxes, centers2d, gt_labels, depths = self._bboxes_transform(
-                        gt_bboxes, 
+                        gt_bboxes,
                         centers2d,
                         gt_labels,
                         depths,
@@ -153,7 +152,8 @@ class ResizeCropFlipRotImage():
                         flip=flip,
                     )
                 if len(gt_bboxes) != 0 and self.filter_invisible:
-                    gt_bboxes, centers2d, gt_labels, depths =  self._filter_invisible(gt_bboxes, centers2d, gt_labels, depths)
+                    gt_bboxes, centers2d, gt_labels, depths = self._filter_invisible(gt_bboxes, centers2d, gt_labels,
+                                                                                     depths)
 
                 new_gt_bboxes.append(gt_bboxes)
                 new_centers2d.append(centers2d)
@@ -167,11 +167,12 @@ class ResizeCropFlipRotImage():
         results['gt_labels'] = new_gt_labels
         results['depths'] = new_depths
         results['img'] = new_imgs
-        results['lidar2img'] = [results['intrinsics'][i] @ results['extrinsics'][i] for i in range(len(results['extrinsics']))]
+        results['lidar2img'] = [results['intrinsics'][i] @ results['extrinsics'][i] for i in
+                                range(len(results['extrinsics']))]
 
         return results
 
-    def _bboxes_transform(self, bboxes, centers2d, gt_labels, depths,resize, crop, flip):
+    def _bboxes_transform(self, bboxes, centers2d, gt_labels, depths, resize, crop, flip):
         assert len(bboxes) == len(centers2d) == len(gt_labels) == len(depths)
         fH, fW = self.data_aug_conf["final_dim"]
         bboxes = bboxes * resize
@@ -181,10 +182,9 @@ class ResizeCropFlipRotImage():
         bboxes[:, 3] = bboxes[:, 3] - crop[1]
         bboxes[:, 0] = np.clip(bboxes[:, 0], 0, fW)
         bboxes[:, 2] = np.clip(bboxes[:, 2], 0, fW)
-        bboxes[:, 1] = np.clip(bboxes[:, 1], 0, fH) 
+        bboxes[:, 1] = np.clip(bboxes[:, 1], 0, fH)
         bboxes[:, 3] = np.clip(bboxes[:, 3], 0, fH)
         keep = ((bboxes[:, 2] - bboxes[:, 0]) >= self.min_size) & ((bboxes[:, 3] - bboxes[:, 1]) >= self.min_size)
-
 
         if flip:
             x0 = bboxes[:, 0].copy()
@@ -193,11 +193,11 @@ class ResizeCropFlipRotImage():
             bboxes[:, 0] = fW - x1
         bboxes = bboxes[keep]
 
-        centers2d  = centers2d * resize
+        centers2d = centers2d * resize
         centers2d[:, 0] = centers2d[:, 0] - crop[0]
         centers2d[:, 1] = centers2d[:, 1] - crop[1]
         centers2d[:, 0] = np.clip(centers2d[:, 0], 0, fW)
-        centers2d[:, 1] = np.clip(centers2d[:, 1], 0, fH) 
+        centers2d[:, 1] = np.clip(centers2d[:, 1], 0, fH)
         if flip:
             centers2d[:, 0] = fW - centers2d[:, 0]
 
@@ -207,12 +207,11 @@ class ResizeCropFlipRotImage():
 
         return bboxes, centers2d, gt_labels, depths
 
-
     def _filter_invisible(self, bboxes, centers2d, gt_labels, depths):
         # filter invisible 2d bboxes
         assert len(bboxes) == len(centers2d) == len(gt_labels) == len(depths)
         fH, fW = self.data_aug_conf["final_dim"]
-        indices_maps = np.zeros((fH,fW))
+        indices_maps = np.zeros((fH, fW))
         tmp_bboxes = np.zeros_like(bboxes)
         tmp_bboxes[:, :2] = np.ceil(bboxes[:, :2])
         tmp_bboxes[:, 2:] = np.floor(bboxes[:, 2:])
@@ -233,8 +232,6 @@ class ResizeCropFlipRotImage():
         gt_labels = gt_labels[indices_res]
 
         return bboxes, centers2d, gt_labels, depths
-
-
 
     def _get_rot(self, h):
         return torch.Tensor(
@@ -297,15 +294,16 @@ class ResizeCropFlipRotImage():
             rotate = 0
         return resize, resize_dims, crop, flip, rotate
 
+
 @PIPELINES.register_module()
 class GlobalRotScaleTransImage():
     def __init__(
-        self,
-        rot_range=[-0.3925, 0.3925],
-        scale_ratio_range=[0.95, 1.05],
-        translation_std=[0, 0, 0],
-        reverse_angle=False,
-        training=True,
+            self,
+            rot_range=[-0.3925, 0.3925],
+            scale_ratio_range=[0.95, 1.05],
+            translation_std=[0, 0, 0],
+            reverse_angle=False,
+            training=True,
     ):
 
         self.rot_range = rot_range
@@ -328,13 +326,13 @@ class GlobalRotScaleTransImage():
             rot_angle = rot_angle * -1
         results["gt_bboxes_3d"].rotate(
             np.array(rot_angle)
-        )  
+        )
 
         # random scale
         self._scale_xyz(results, scale_ratio)
         results["gt_bboxes_3d"].scale(scale_ratio)
 
-        #random translate
+        # random translate
         self._trans_xyz(results, trans)
         results["gt_bboxes_3d"].translate(trans)
 
@@ -350,7 +348,6 @@ class GlobalRotScaleTransImage():
 
         for view in range(num_view):
             results["lidar2img"][view] = (torch.tensor(results["lidar2img"][view]).float() @ trans_mat_inv).numpy()
-
 
     def _rotate_bev_along_z(self, results, angle):
         rot_cos = torch.cos(torch.tensor(angle))

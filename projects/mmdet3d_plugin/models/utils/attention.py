@@ -4,25 +4,20 @@
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
 # flash-attention 
-import math
 import torch
 import torch.nn as nn
+from einops import rearrange
+from flash_attn.bert_padding import unpad_input
+from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
+from mmcv.runner import auto_fp16
+from torch.nn.functional import linear
 from torch.nn.init import (
     xavier_uniform_,
-    constant_,
-    xavier_normal_
+    constant_
 )
-from torch.nn.functional import linear
-
-from einops import rearrange
-from mmcv.runner import auto_fp16
-from mmcv.runner.base_module import BaseModule
-
-from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
-from flash_attn.bert_padding import unpad_input, pad_input, index_first_axis
 
 
-def _in_projection_packed(q, k, v, w, b = None):
+def _in_projection_packed(q, k, v, w, b=None):
     w_q, w_k, w_v = w.chunk(3)
     if b is None:
         b_q = b_k = b_v = None
@@ -41,6 +36,7 @@ class FlashAttention(nn.Module):
         attention_dropout: The dropout rate to apply to the attention
                            (default: 0.1)
     """
+
     def __init__(self, softmax_scale=None, attention_dropout=0.0, device=None, dtype=None):
         super().__init__()
         self.softmax_scale = softmax_scale
@@ -48,8 +44,8 @@ class FlashAttention(nn.Module):
         self.fp16_enabled = True
 
     @auto_fp16(apply_to=('q', 'kv'), out_fp32=True)
-    def forward(self, q, kv, 
-                causal=False, 
+    def forward(self, q, kv,
+                causal=False,
                 key_padding_mask=None):
         """Implements the multihead softmax attention.
         Arguments
@@ -66,11 +62,11 @@ class FlashAttention(nn.Module):
         seqlen_q, seqlen_k = q.shape[1], kv.shape[1]
         if key_padding_mask is None:
             q, kv = rearrange(q, 'b s ... -> (b s) ...'), rearrange(kv, 'b s ... -> (b s) ...')
-            max_sq, max_sk = seqlen_q, seqlen_k 
+            max_sq, max_sk = seqlen_q, seqlen_k
             cu_seqlens_q = torch.arange(0, (batch_size + 1) * seqlen_q, step=seqlen_q, dtype=torch.int32,
-                                    device=q.device)
+                                        device=q.device)
             cu_seqlens_k = torch.arange(0, (batch_size + 1) * seqlen_k, step=seqlen_k, dtype=torch.int32,
-                                    device=kv.device)                    
+                                        device=kv.device)
             output = flash_attn_unpadded_kvpacked_func(
                 q, kv, cu_seqlens_q, cu_seqlens_k, max_sq, max_sk,
                 self.dropout_p if self.training else 0.0,
@@ -82,7 +78,7 @@ class FlashAttention(nn.Module):
             q = rearrange(q, 'b s ... -> (b s) ...')
             max_sq = seqlen_q
             cu_seqlens_q = torch.arange(0, (batch_size + 1) * seqlen_q, step=seqlen_q, dtype=torch.int32,
-                                    device=q.device)
+                                        device=q.device)
             x = rearrange(kv, 'b s two h d -> b s (two h d)')
             x_unpad, indices, cu_seqlens_k, max_sk = unpad_input(x, key_padding_mask)
             x_unpad = rearrange(x_unpad, 'nnz (two h d) -> nnz two h d', two=2, h=nheads)
@@ -126,7 +122,7 @@ class FlashMHA(nn.Module):
         if self.in_proj_bias is not None:
             constant_(self.in_proj_bias, 0.)
             constant_(self.out_proj.bias, 0.)
-        
+
     def forward(self, q, k, v, key_padding_mask=None):
         """x: (batch, seqlen, hidden_dim) (where hidden_dim = num heads * head dim)
         key_padding_mask: bool tensor of shape (batch, seqlen)
@@ -137,6 +133,6 @@ class FlashMHA(nn.Module):
         k = rearrange(k, 'b s (h d) -> b s h d', h=self.num_heads)
         v = rearrange(v, 'b s (h d) -> b s h d', h=self.num_heads)
         kv = torch.stack([k, v], dim=2)
-        
+
         context, attn_weights = self.inner_attn(q, kv, key_padding_mask=key_padding_mask, causal=self.causal)
         return self.out_proj(rearrange(context, 'b s h d -> b s (h d)')), attn_weights

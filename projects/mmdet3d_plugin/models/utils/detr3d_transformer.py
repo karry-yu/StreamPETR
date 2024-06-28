@@ -1,32 +1,30 @@
-import numpy as np
+import copy
+import warnings
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.utils.checkpoint as cp
 from mmcv.cnn import xavier_init, constant_init, build_norm_layer
-from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
-                                         TransformerLayerSequence,
+from mmcv.cnn.bricks.registry import (ATTENTION, TRANSFORMER_LAYER,
+                                      TRANSFORMER_LAYER_SEQUENCE)
+from mmcv.cnn.bricks.transformer import (TransformerLayerSequence,
                                          build_transformer_layer_sequence,
                                          build_attention,
                                          build_feedforward_network)
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttnFunction
 from mmcv.runner.base_module import BaseModule
-from mmcv.cnn.bricks.registry import (ATTENTION,TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
+from mmcv.utils import ConfigDict
 from mmdet.models.utils.builder import TRANSFORMER
-from projects.mmdet3d_plugin.models.utils.positional_encoding import pos2posemb3d
-from mmdet.models.utils.transformer import inverse_sigmoid
-from mmcv.utils import deprecated_api_warning, ConfigDict
-import warnings
-import copy
 from torch.nn import ModuleList
-import torch.utils.checkpoint as cp
 
 # Disable warnings
 warnings.filterwarnings("ignore")
 
+
 def get_global_pos(points, pc_range):
     points = points * (pc_range[3:6] - pc_range[0:3]) + pc_range[0:3]
     return points
+
 
 @TRANSFORMER.register_module()
 class Detr3DTransformer(BaseModule):
@@ -60,14 +58,14 @@ class Detr3DTransformer(BaseModule):
                 query_pos,
                 feat_flatten,
                 spatial_flatten,
-                level_start_index, 
-                temp_memory, 
+                level_start_index,
+                temp_memory,
                 temp_pos,
                 attn_masks,
-                reference_points, 
-                pc_range, 
-                data, 
-                img_metas,):
+                reference_points,
+                pc_range,
+                data,
+                img_metas, ):
         """Forward function for `Detr3DTransformer`.
         Args:
             mlvl_feats (list(Tensor)): Input queries from
@@ -106,22 +104,23 @@ class Detr3DTransformer(BaseModule):
                     otherwise None.
         """
         lidar2img = data['lidar2img']
-        
+
         inter_states = self.decoder(
             query=query,
             query_pos=query_pos,
             mlvl_feats=feat_flatten,
-            temp_memory=temp_memory, 
+            temp_memory=temp_memory,
             temp_pos=temp_pos,
             reference_points=reference_points,
             spatial_flatten=spatial_flatten,
             level_start_index=level_start_index,
-            pc_range=pc_range, 
-            lidar2img=lidar2img, 
+            pc_range=pc_range,
+            lidar2img=lidar2img,
             img_metas=img_metas,
             attn_masks=attn_masks)
 
         return inter_states
+
 
 @TRANSFORMER_LAYER_SEQUENCE.register_module()
 class Detr3DTransformerDecoder(TransformerLayerSequence):
@@ -139,13 +138,13 @@ class Detr3DTransformerDecoder(TransformerLayerSequence):
                 query,
                 query_pos,
                 mlvl_feats,
-                temp_memory, 
+                temp_memory,
                 temp_pos,
                 reference_points,
                 spatial_flatten,
                 level_start_index,
-                pc_range, 
-                lidar2img, 
+                pc_range,
+                lidar2img,
                 img_metas,
                 attn_masks):
         """Forward function for `Detr3DTransformerDecoder`.
@@ -167,24 +166,24 @@ class Detr3DTransformerDecoder(TransformerLayerSequence):
         """
         intermediate = []
         for lid, layer in enumerate(self.layers):
-            
             query = layer(
                 query,
                 query_pos,
                 mlvl_feats,
-                temp_memory, 
+                temp_memory,
                 temp_pos,
                 reference_points,
                 spatial_flatten,
                 level_start_index,
-                pc_range, 
-                lidar2img, 
+                pc_range,
+                lidar2img,
                 img_metas,
                 attn_masks)
 
             intermediate.append(query)
 
         return torch.stack(intermediate)
+
 
 @TRANSFORMER_LAYER.register_module()
 class Detr3DTemporalDecoderLayer(BaseModule):
@@ -245,10 +244,10 @@ class Detr3DTemporalDecoderLayer(BaseModule):
 
         assert set(operation_order) & {
             'self_attn', 'norm', 'ffn', 'cross_attn'} == \
-            set(operation_order), f'The operation_order of' \
-            f' {self.__class__.__name__} should ' \
-            f'contains all four operation type ' \
-            f"{['self_attn', 'norm', 'ffn', 'cross_attn']}"
+               set(operation_order), f'The operation_order of' \
+                                     f' {self.__class__.__name__} should ' \
+                                     f'contains all four operation type ' \
+                                     f"{['self_attn', 'norm', 'ffn', 'cross_attn']}"
 
         num_attn = operation_order.count('self_attn') + operation_order.count(
             'cross_attn')
@@ -256,9 +255,9 @@ class Detr3DTemporalDecoderLayer(BaseModule):
             attn_cfgs = [copy.deepcopy(attn_cfgs) for _ in range(num_attn)]
         else:
             assert num_attn == len(attn_cfgs), f'The length ' \
-                f'of attn_cfg {num_attn} is ' \
-                f'not consistent with the number of attention' \
-                f'in operation_order {operation_order}.'
+                                               f'of attn_cfg {num_attn} is ' \
+                                               f'not consistent with the number of attention' \
+                                               f'in operation_order {operation_order}.'
 
         self.num_attn = num_attn
         self.operation_order = operation_order
@@ -306,21 +305,21 @@ class Detr3DTemporalDecoderLayer(BaseModule):
         self.use_checkpoint = with_cp
 
     def _forward(self,
-                query,
-                query_pos,
-                mlvl_feats,
-                temp_memory, 
-                temp_pos,
-                reference_points,
-                spatial_flatten,
-                level_start_index,
-                pc_range, 
-                lidar2img, 
-                img_metas,
-                attn_masks=None,
-                query_key_padding_mask=None,
-                key_padding_mask=None,
-                **kwargs):
+                 query,
+                 query_pos,
+                 mlvl_feats,
+                 temp_memory,
+                 temp_pos,
+                 reference_points,
+                 spatial_flatten,
+                 level_start_index,
+                 pc_range,
+                 lidar2img,
+                 img_metas,
+                 attn_masks=None,
+                 query_key_padding_mask=None,
+                 key_padding_mask=None,
+                 **kwargs):
         """Forward function for `TransformerDecoderLayer`.
 
         **kwargs contains some specific arguments of attentions.
@@ -366,9 +365,9 @@ class Detr3DTemporalDecoderLayer(BaseModule):
                           f'{self.__class__.__name__} ')
         else:
             assert len(attn_masks) == self.num_attn, f'The length of ' \
-                        f'attn_masks {len(attn_masks)} must be equal ' \
-                        f'to the number of attention in ' \
-                        f'operation_order {self.num_attn}'
+                                                     f'attn_masks {len(attn_masks)} must be equal ' \
+                                                     f'to the number of attention in ' \
+                                                     f'operation_order {self.num_attn}'
 
         for layer in self.operation_order:
             if layer == 'self_attn':
@@ -403,8 +402,8 @@ class Detr3DTemporalDecoderLayer(BaseModule):
                     reference_points,
                     spatial_flatten,
                     level_start_index,
-                    pc_range, 
-                    lidar2img, 
+                    pc_range,
+                    lidar2img,
                     img_metas,
                     **kwargs)
                 attn_index += 1
@@ -417,17 +416,17 @@ class Detr3DTemporalDecoderLayer(BaseModule):
 
         return query
 
-    def forward(self, 
+    def forward(self,
                 query,
                 query_pos,
                 mlvl_feats,
-                temp_memory, 
+                temp_memory,
                 temp_pos,
                 reference_points,
                 spatial_flatten,
                 level_start_index,
-                pc_range, 
-                lidar2img, 
+                pc_range,
+                lidar2img,
                 img_metas,
                 attn_masks=None,
                 query_key_padding_mask=None,
@@ -440,39 +439,39 @@ class Detr3DTemporalDecoderLayer(BaseModule):
 
         if self.use_checkpoint and self.training:
             x = cp.checkpoint(
-                self._forward, 
+                self._forward,
                 query,
                 query_pos,
                 mlvl_feats,
-                temp_memory, 
+                temp_memory,
                 temp_pos,
                 reference_points,
                 spatial_flatten,
                 level_start_index,
-                pc_range, 
-                lidar2img, 
+                pc_range,
+                lidar2img,
                 img_metas,
                 attn_masks,
                 query_key_padding_mask,
                 key_padding_mask,
-                )
+            )
         else:
             x = self._forward(
-            query,
-            query_pos,
-            mlvl_feats,
-            temp_memory, 
-            temp_pos,
-            reference_points,
-            spatial_flatten,
-            level_start_index,
-            pc_range, 
-            lidar2img, 
-            img_metas,
-            attn_masks,
-            query_key_padding_mask,
-            key_padding_mask,
-        )
+                query,
+                query_pos,
+                mlvl_feats,
+                temp_memory,
+                temp_pos,
+                reference_points,
+                spatial_flatten,
+                level_start_index,
+                pc_range,
+                lidar2img,
+                img_metas,
+                attn_masks,
+                query_key_padding_mask,
+                key_padding_mask,
+            )
         return x
 
 
@@ -489,7 +488,7 @@ class DeformableFeatureAggregationCuda(BaseModule):
             im2col_step=64,
             batch_first=True,
             bias=1.,
-            ):
+    ):
         super(DeformableFeatureAggregationCuda, self).__init__()
         self.embed_dims = embed_dims
         self.num_groups = num_groups
@@ -513,16 +512,18 @@ class DeformableFeatureAggregationCuda(BaseModule):
     def init_weight(self):
         constant_init(self.weights_fc, val=0.0, bias=0.0)
         xavier_init(self.output_proj, distribution="uniform", bias=0.0)
-        nn.init.uniform_(self.learnable_fc.bias.data, -self.bias, self.bias)    
+        nn.init.uniform_(self.learnable_fc.bias.data, -self.bias, self.bias)
 
-    def forward(self, instance_feature, query_pos,feat_flatten, reference_points, spatial_flatten, level_start_index, pc_range, lidar2img_mat, img_metas):
+    def forward(self, instance_feature, query_pos, feat_flatten, reference_points, spatial_flatten, level_start_index,
+                pc_range, lidar2img_mat, img_metas):
         bs, num_anchor = reference_points.shape[:2]
         reference_points = get_global_pos(reference_points, pc_range)
         key_points = reference_points.unsqueeze(-2) + self.learnable_fc(instance_feature).reshape(bs, num_anchor, -1, 3)
 
         weights = self._get_weights(instance_feature, query_pos, lidar2img_mat)
 
-        features = self.feature_sampling(feat_flatten, spatial_flatten, level_start_index, key_points, weights, lidar2img_mat, img_metas)
+        features = self.feature_sampling(feat_flatten, spatial_flatten, level_start_index, key_points, weights,
+                                         lidar2img_mat, img_metas)
 
         output = self.output_proj(features)
         output = self.drop(output) + instance_feature
@@ -531,13 +532,15 @@ class DeformableFeatureAggregationCuda(BaseModule):
     def _get_weights(self, instance_feature, anchor_embed, lidar2img_mat):
         bs, num_anchor = instance_feature.shape[:2]
         lidar2img = lidar2img_mat[..., :3, :].flatten(-2)
-        cam_embed = self.cam_embed(lidar2img) # B, N, C
+        cam_embed = self.cam_embed(lidar2img)  # B, N, C
         feat_pos = (instance_feature + anchor_embed).unsqueeze(2) + cam_embed.unsqueeze(1)
         weights = self.weights_fc(feat_pos).reshape(bs, num_anchor, -1, self.num_groups).softmax(dim=-2)
-        weights = weights.reshape(bs, num_anchor, self.num_cams, -1, self.num_groups).permute(0, 2, 1, 4, 3).contiguous()
+        weights = weights.reshape(bs, num_anchor, self.num_cams, -1, self.num_groups).permute(0, 2, 1, 4,
+                                                                                              3).contiguous()
         return weights.flatten(end_dim=1)
 
-    def feature_sampling(self, feat_flatten, spatial_flatten, level_start_index, key_points, weights, lidar2img_mat, img_metas):
+    def feature_sampling(self, feat_flatten, spatial_flatten, level_start_index, key_points, weights, lidar2img_mat,
+                         img_metas):
         bs, num_anchor, _ = key_points.shape[:3]
 
         pts_extand = torch.cat([key_points, torch.ones_like(key_points[..., :1])], dim=-1)
@@ -547,16 +550,16 @@ class DeformableFeatureAggregationCuda(BaseModule):
         points_2d[..., 0:1] = points_2d[..., 0:1] / img_metas[0]['pad_shape'][0][1]
         points_2d[..., 1:2] = points_2d[..., 1:2] / img_metas[0]['pad_shape'][0][0]
 
-        points_2d = points_2d.flatten(end_dim=1) #[b*6, 900, 13, 2]
+        points_2d = points_2d.flatten(end_dim=1)  # [b*6, 900, 13, 2]
         points_2d = points_2d[:, :, None, None, :, :].repeat(1, 1, self.num_groups, self.num_levels, 1, 1)
 
         bn, num_value, _ = feat_flatten.size()
         feat_flatten = feat_flatten.reshape(bn, num_value, self.num_groups, -1)
         # attention_weights = weights * mask
         output = MultiScaleDeformableAttnFunction.apply(
-                feat_flatten, spatial_flatten, level_start_index, points_2d,
-                weights, self.im2col_step)
-        
+            feat_flatten, spatial_flatten, level_start_index, points_2d,
+            weights, self.im2col_step)
+
         output = output.reshape(bs, self.num_cams, num_anchor, -1)
 
         return output.sum(1)

@@ -1,6 +1,7 @@
 import torch
 from mmdet.core.bbox.match_costs.builder import MATCH_COST
 
+
 @MATCH_COST.register_module()
 class BBox3DL1Cost(object):
     """BBox3DL1Cost.
@@ -24,4 +25,3 @@ class BBox3DL1Cost(object):
         """
         bbox_cost = torch.cdist(bbox_pred, gt_bboxes, p=1)
         return bbox_cost * self.weight
-

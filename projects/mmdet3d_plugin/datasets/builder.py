@@ -3,22 +3,18 @@
 # ---------------------------------------------
 #  Modified by Shihao Wang
 # ---------------------------------------------
-import copy
-import platform
 import random
 from functools import partial
 
 import numpy as np
 from mmcv.parallel import collate
 from mmcv.runner import get_dist_info
-from mmcv.utils import Registry, build_from_cfg
+from mmdet.datasets.samplers import GroupSampler
 from torch.utils.data import DataLoader
 
-from mmdet.datasets.samplers import GroupSampler
-from projects.mmdet3d_plugin.datasets.samplers.group_sampler import DistributedGroupSampler
-from projects.mmdet3d_plugin.datasets.samplers.distributed_sampler import DistributedSampler
 from projects.mmdet3d_plugin.datasets.samplers.group_sampler import InfiniteGroupEachSampleInBatchSampler
 from projects.mmdet3d_plugin.datasets.samplers.sampler import build_sampler
+
 
 def build_dataloader(dataset,
                      samples_per_gpu,
@@ -54,24 +50,26 @@ def build_dataloader(dataset,
         # DistributedGroupSampler will definitely shuffle the data to satisfy
         # that images on each GPU are in the same group
         if shuffle:
-            sampler = build_sampler(shuffler_sampler if shuffler_sampler is not None else dict(type='DistributedGroupSampler'),
-                                     dict(
-                                         dataset=dataset,
-                                         samples_per_gpu=samples_per_gpu,
-                                         num_replicas=world_size,
-                                         rank=rank,
-                                         seed=seed)
-                                     )
+            sampler = build_sampler(
+                shuffler_sampler if shuffler_sampler is not None else dict(type='DistributedGroupSampler'),
+                dict(
+                    dataset=dataset,
+                    samples_per_gpu=samples_per_gpu,
+                    num_replicas=world_size,
+                    rank=rank,
+                    seed=seed)
+            )
 
         else:
-            sampler = build_sampler(nonshuffler_sampler if nonshuffler_sampler is not None else dict(type='DistributedSampler'),
-                                     dict(
-                                         dataset=dataset,
-                                         num_replicas=world_size,
-                                         rank=rank,
-                                         shuffle=shuffle,
-                                         seed=seed)
-                                     )
+            sampler = build_sampler(
+                nonshuffler_sampler if nonshuffler_sampler is not None else dict(type='DistributedSampler'),
+                dict(
+                    dataset=dataset,
+                    num_replicas=world_size,
+                    rank=rank,
+                    shuffle=shuffle,
+                    seed=seed)
+            )
 
         batch_size = samples_per_gpu
         num_workers = workers_per_gpu
@@ -86,8 +84,7 @@ def build_dataloader(dataset,
         num_workers = num_gpus * workers_per_gpu
         batch_sampler = None
 
-
-    if runner_type['type'] == 'IterBasedRunner' and shuffler_sampler['type'] =='InfiniteGroupEachSampleInBatchSampler':
+    if runner_type['type'] == 'IterBasedRunner' and shuffler_sampler['type'] == 'InfiniteGroupEachSampleInBatchSampler':
         # TODO: original has more options, but I'm not using them 
         # https://github.com/open-mmlab/mmdetection/blob/3b72b12fe9b14de906d1363982b9fba05e7d47c1/mmdet/datasets/builder.py#L145-L157
         batch_sampler = InfiniteGroupEachSampleInBatchSampler(
@@ -98,7 +95,6 @@ def build_dataloader(dataset,
             seed=seed)
         batch_size = 1
         sampler = None
-
 
     init_fn = partial(
         worker_init_fn, num_workers=num_workers, rank=rank,
@@ -136,6 +132,7 @@ from mmdet.datasets.builder import _concat_dataset
 if platform.system() != 'Windows':
     # https://github.com/pytorch/pytorch/issues/973
     import resource
+
     rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
     base_soft_limit = rlimit[0]
     hard_limit = rlimit[1]

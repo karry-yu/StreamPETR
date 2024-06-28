@@ -12,20 +12,22 @@
 import torch
 import torch.nn as nn
 from mmcv.cnn import Linear, bias_init_with_prob
-
 from mmcv.runner import force_fp32
 from mmdet.core import (build_assigner, build_sampler, multi_apply,
                         reduce_mean)
-from mmdet.models.utils import build_transformer
 from mmdet.models import HEADS, build_loss
 from mmdet.models.dense_heads.anchor_free_head import AnchorFreeHead
+from mmdet.models.utils import NormedLinear
+from mmdet.models.utils import build_transformer
 from mmdet.models.utils.transformer import inverse_sigmoid
 from mmdet3d.core.bbox.coders import build_bbox_coder
-from projects.mmdet3d_plugin.core.bbox.util import normalize_bbox
 
-from mmdet.models.utils import NormedLinear
-from projects.mmdet3d_plugin.models.utils.positional_encoding import pos2posemb3d, pos2posemb1d, nerf_positional_encoding
-from projects.mmdet3d_plugin.models.utils.misc import MLN, topk_gather, transform_reference_points, memory_refresh, SELayer_Linear
+from projects.mmdet3d_plugin.core.bbox.util import normalize_bbox
+from projects.mmdet3d_plugin.models.utils.misc import MLN, topk_gather, transform_reference_points, memory_refresh, \
+    SELayer_Linear
+from projects.mmdet3d_plugin.models.utils.positional_encoding import pos2posemb3d, pos2posemb1d, \
+    nerf_positional_encoding
+
 
 @HEADS.register_module()
 class StreamPETRHead(AnchorFreeHead):
@@ -91,18 +93,18 @@ class StreamPETRHead(AnchorFreeHead):
                          cls_cost=dict(type='ClassificationCost', weight=1.),
                          reg_cost=dict(type='BBoxL1Cost', weight=5.0),
                          iou_cost=dict(
-                             type='IoUCost', iou_mode='giou', weight=2.0)),),
+                             type='IoUCost', iou_mode='giou', weight=2.0)), ),
                  test_cfg=dict(max_per_img=100),
                  depth_step=0.8,
                  depth_num=64,
                  LID=False,
-                 depth_start = 1,
+                 depth_start=1,
                  position_range=[-65, -65, -8.0, 65, 65, 8.0],
-                 scalar = 5,
-                 noise_scale = 0.4,
-                 noise_trans = 0.0,
-                 dn_weight = 1.0,
-                 split = 0.5,
+                 scalar=5,
+                 noise_scale=0.4,
+                 noise_trans=0.0,
+                 dn_weight=1.0,
+                 split=0.5,
                  init_cfg=None,
                  normedlinear=False,
                  **kwargs):
@@ -130,14 +132,14 @@ class StreamPETRHead(AnchorFreeHead):
         class_weight = loss_cls.get('class_weight', None)
         if class_weight is not None and (self.__class__ is StreamPETRHead):
             assert isinstance(class_weight, float), 'Expected ' \
-                'class_weight to have type float. Found ' \
-                f'{type(class_weight)}.'
+                                                    'class_weight to have type float. Found ' \
+                                                    f'{type(class_weight)}.'
             # NOTE following the official DETR rep0, bg_cls_weight means
             # relative classification weight of the no-object class.
             bg_cls_weight = loss_cls.get('bg_cls_weight', class_weight)
             assert isinstance(bg_cls_weight, float), 'Expected ' \
-                'bg_cls_weight to have type float. Found ' \
-                f'{type(bg_cls_weight)}.'
+                                                     'bg_cls_weight to have type float. Found ' \
+                                                     f'{type(bg_cls_weight)}.'
             class_weight = torch.ones(num_classes + 1) * class_weight
             # set background class as the last indice
             class_weight[num_classes] = bg_cls_weight
@@ -147,10 +149,9 @@ class StreamPETRHead(AnchorFreeHead):
             self.bg_cls_weight = bg_cls_weight
 
         if train_cfg:
-            assert 'assigner' in train_cfg, 'assigner should be provided '\
-                'when train_cfg is set.'
+            assert 'assigner' in train_cfg, 'assigner should be provided ' \
+                                            'when train_cfg is set.'
             assigner = train_cfg['assigner']
-
 
             self.assigner = build_assigner(assigner)
             # DETR sampling=False, so use PseudoSampler
@@ -176,19 +177,19 @@ class StreamPETRHead(AnchorFreeHead):
         self.position_dim = depth_num * 3
         self.LID = LID
         self.depth_start = depth_start
-        self.stride=stride
+        self.stride = stride
 
         self.scalar = scalar
         self.bbox_noise_scale = noise_scale
         self.bbox_noise_trans = noise_trans
         self.dn_weight = dn_weight
-        self.split = split 
+        self.split = split
 
         self.act_cfg = transformer.get('act_cfg',
                                        dict(type='ReLU', inplace=True))
         self.num_pred = 6
         self.normedlinear = normedlinear
-        super(StreamPETRHead, self).__init__(num_classes, in_channels, init_cfg = init_cfg)
+        super(StreamPETRHead, self).__init__(num_classes, in_channels, init_cfg=init_cfg)
 
         self.loss_cls = build_loss(loss_cls)
         self.loss_bbox = build_loss(loss_bbox)
@@ -214,14 +215,14 @@ class StreamPETRHead(AnchorFreeHead):
 
         self.position_range = nn.Parameter(torch.tensor(
             position_range), requires_grad=False)
-        
+
         if self.LID:
-            index  = torch.arange(start=0, end=self.depth_num, step=1).float()
+            index = torch.arange(start=0, end=self.depth_num, step=1).float()
             index_1 = index + 1
             bin_size = (self.position_range[3] - self.depth_start) / (self.depth_num * (1 + self.depth_num))
             coords_d = self.depth_start + bin_size * index * index_1
         else:
-            index  = torch.arange(start=0, end=self.depth_num, step=1).float()
+            index = torch.arange(start=0, end=self.depth_num, step=1).float()
             bin_size = (self.position_range[3] - self.depth_start) / self.depth_num
             coords_d = self.depth_start + bin_size * index
 
@@ -257,17 +258,17 @@ class StreamPETRHead(AnchorFreeHead):
             [reg_branch for _ in range(self.num_pred)])
 
         self.position_encoder = nn.Sequential(
-                nn.Linear(self.position_dim, self.embed_dims*4),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims*4, self.embed_dims),
-            )
+            nn.Linear(self.position_dim, self.embed_dims * 4),
+            nn.ReLU(),
+            nn.Linear(self.embed_dims * 4, self.embed_dims),
+        )
 
         self.memory_embed = nn.Sequential(
-                nn.Linear(self.in_channels, self.embed_dims),
-                nn.ReLU(),
-                nn.Linear(self.embed_dims, self.embed_dims),
-            )
-        
+            nn.Linear(self.in_channels, self.embed_dims),
+            nn.ReLU(),
+            nn.Linear(self.embed_dims, self.embed_dims),
+        )
+
         # can be replaced with MLN
         self.featurized_pe = SELayer_Linear(self.embed_dims)
 
@@ -275,9 +276,8 @@ class StreamPETRHead(AnchorFreeHead):
         if self.num_propagated > 0:
             self.pseudo_reference_points = nn.Embedding(self.num_propagated, 3)
 
-
         self.query_embedding = nn.Sequential(
-            nn.Linear(self.embed_dims*3//2, self.embed_dims),
+            nn.Linear(self.embed_dims * 3 // 2, self.embed_dims),
             nn.ReLU(),
             nn.Linear(self.embed_dims, self.embed_dims),
         )
@@ -308,7 +308,6 @@ class StreamPETRHead(AnchorFreeHead):
             for m in self.cls_branches:
                 nn.init.constant_(m[-1].bias, bias_init)
 
-
     def reset_memory(self):
         self.memory_embedding = None
         self.memory_reference_point = None
@@ -329,18 +328,23 @@ class StreamPETRHead(AnchorFreeHead):
         else:
             self.memory_timestamp += data['timestamp'].unsqueeze(-1).unsqueeze(-1)
             self.memory_egopose = data['ego_pose_inv'].unsqueeze(1) @ self.memory_egopose
-            self.memory_reference_point = transform_reference_points(self.memory_reference_point, data['ego_pose_inv'], reverse=False)
+            self.memory_reference_point = transform_reference_points(self.memory_reference_point, data['ego_pose_inv'],
+                                                                     reverse=False)
             self.memory_timestamp = memory_refresh(self.memory_timestamp[:, :self.memory_len], x)
             self.memory_reference_point = memory_refresh(self.memory_reference_point[:, :self.memory_len], x)
             self.memory_embedding = memory_refresh(self.memory_embedding[:, :self.memory_len], x)
             self.memory_egopose = memory_refresh(self.memory_egopose[:, :self.memory_len], x)
             self.memory_velo = memory_refresh(self.memory_velo[:, :self.memory_len], x)
-        
+
         # for the first frame, padding pseudo_reference_points (non-learnable)
         if self.num_propagated > 0:
-            pseudo_reference_points = self.pseudo_reference_points.weight * (self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3]
-            self.memory_reference_point[:, :self.num_propagated]  = self.memory_reference_point[:, :self.num_propagated] + (1 - x).view(B, 1, 1) * pseudo_reference_points
-            self.memory_egopose[:, :self.num_propagated]  = self.memory_egopose[:, :self.num_propagated] + (1 - x).view(B, 1, 1, 1) * torch.eye(4, device=x.device)
+            pseudo_reference_points = self.pseudo_reference_points.weight * (
+                    self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3]
+            self.memory_reference_point[:, :self.num_propagated] = self.memory_reference_point[:,
+                                                                   :self.num_propagated] + (1 - x).view(B, 1,
+                                                                                                        1) * pseudo_reference_points
+            self.memory_egopose[:, :self.num_propagated] = self.memory_egopose[:, :self.num_propagated] + (1 - x).view(
+                B, 1, 1, 1) * torch.eye(4, device=x.device)
 
     def post_update_memory(self, data, rec_ego_pose, all_cls_scores, all_bbox_preds, outs_dec, mask_dict):
         if self.training and mask_dict and mask_dict['pad_size'] > 0:
@@ -355,7 +359,7 @@ class StreamPETRHead(AnchorFreeHead):
             rec_memory = outs_dec[-1]
             rec_score = all_cls_scores[-1].sigmoid().topk(1, dim=-1).values[..., 0:1]
             rec_timestamp = torch.zeros_like(rec_score, dtype=torch.float64)
-        
+
         # topk proposals
         _, topk_indexes = torch.topk(rec_score, self.topk_proposals, dim=1)
         rec_timestamp = topk_gather(rec_timestamp, topk_indexes)
@@ -366,10 +370,11 @@ class StreamPETRHead(AnchorFreeHead):
 
         self.memory_embedding = torch.cat([rec_memory, self.memory_embedding], dim=1)
         self.memory_timestamp = torch.cat([rec_timestamp, self.memory_timestamp], dim=1)
-        self.memory_egopose= torch.cat([rec_ego_pose, self.memory_egopose], dim=1)
+        self.memory_egopose = torch.cat([rec_ego_pose, self.memory_egopose], dim=1)
         self.memory_reference_point = torch.cat([rec_reference_points, self.memory_reference_point], dim=1)
         self.memory_velo = torch.cat([rec_velo, self.memory_velo], dim=1)
-        self.memory_reference_point = transform_reference_points(self.memory_reference_point, data['ego_pose'], reverse=False)
+        self.memory_reference_point = transform_reference_points(self.memory_reference_point, data['ego_pose'],
+                                                                 reverse=False)
         self.memory_timestamp -= data['timestamp'].unsqueeze(-1).unsqueeze(-1)
         self.memory_egopose = data['ego_pose'].unsqueeze(1) @ self.memory_egopose
 
@@ -380,7 +385,7 @@ class StreamPETRHead(AnchorFreeHead):
 
         intrinsic = torch.stack([data['intrinsics'][..., 0, 0], data['intrinsics'][..., 1, 1]], dim=-1)
         intrinsic = torch.abs(intrinsic) / 1e3
-        intrinsic = intrinsic.repeat(1, H*W, 1).view(B, -1, 2)
+        intrinsic = intrinsic.repeat(1, H * W, 1).view(B, -1, 2)
         LEN = intrinsic.size(1)
 
         num_sample_tokens = topk_indexes.size(1) if topk_indexes is not None else LEN
@@ -393,22 +398,23 @@ class StreamPETRHead(AnchorFreeHead):
 
         memory_centers = memory_centers.detach().view(B, LEN, 1, 2)
         topk_centers = topk_gather(memory_centers, topk_indexes).repeat(1, 1, D, 1)
-        coords_d = self.coords_d.view(1, 1, D, 1).repeat(B, num_sample_tokens, 1 , 1)
+        coords_d = self.coords_d.view(1, 1, D, 1).repeat(B, num_sample_tokens, 1, 1)
         coords = torch.cat([topk_centers, coords_d], dim=-1)
         coords = torch.cat((coords, torch.ones_like(coords[..., :1])), -1)
-        coords[..., :2] = coords[..., :2] * torch.maximum(coords[..., 2:3], torch.ones_like(coords[..., 2:3])*eps)
+        coords[..., :2] = coords[..., :2] * torch.maximum(coords[..., 2:3], torch.ones_like(coords[..., 2:3]) * eps)
 
         coords = coords.unsqueeze(-1)
 
         img2lidars = data['lidar2img'].inverse()
-        img2lidars = img2lidars.view(BN, 1, 1, 4, 4).repeat(1, H*W, D, 1, 1).view(B, LEN, D, 4, 4)
+        img2lidars = img2lidars.view(BN, 1, 1, 4, 4).repeat(1, H * W, D, 1, 1).view(B, LEN, D, 4, 4)
         img2lidars = topk_gather(img2lidars, topk_indexes)
 
         coords3d = torch.matmul(img2lidars, coords).squeeze(-1)[..., :3]
-        coords3d[..., 0:3] = (coords3d[..., 0:3] - self.position_range[0:3]) / (self.position_range[3:6] - self.position_range[0:3])
-        coords3d = coords3d.reshape(B, -1, D*3)
-      
-        pos_embed  = inverse_sigmoid(coords3d)
+        coords3d[..., 0:3] = (coords3d[..., 0:3] - self.position_range[0:3]) / (
+                self.position_range[3:6] - self.position_range[0:3])
+        coords3d = coords3d.reshape(B, -1, D * 3)
+
+        pos_embed = inverse_sigmoid(coords3d)
         coords_position_embeding = self.position_encoder(pos_embed)
         intrinsic = topk_gather(intrinsic, topk_indexes)
 
@@ -420,48 +426,55 @@ class StreamPETRHead(AnchorFreeHead):
     def temporal_alignment(self, query_pos, tgt, reference_points):
         B = query_pos.size(0)
 
-        temp_reference_point = (self.memory_reference_point - self.pc_range[:3]) / (self.pc_range[3:6] - self.pc_range[0:3])
-        temp_pos = self.query_embedding(pos2posemb3d(temp_reference_point)) 
+        temp_reference_point = (self.memory_reference_point - self.pc_range[:3]) / (
+                self.pc_range[3:6] - self.pc_range[0:3])
+        temp_pos = self.query_embedding(pos2posemb3d(temp_reference_point))
         temp_memory = self.memory_embedding
-        rec_ego_pose = torch.eye(4, device=query_pos.device).unsqueeze(0).unsqueeze(0).repeat(B, query_pos.size(1), 1, 1)
-        
+        rec_ego_pose = torch.eye(4, device=query_pos.device).unsqueeze(0).unsqueeze(0).repeat(B, query_pos.size(1), 1,
+                                                                                              1)
+
         if self.with_ego_pos:
-            rec_ego_motion = torch.cat([torch.zeros_like(reference_points[...,:3]), rec_ego_pose[..., :3, :].flatten(-2)], dim=-1)
+            rec_ego_motion = torch.cat(
+                [torch.zeros_like(reference_points[..., :3]), rec_ego_pose[..., :3, :].flatten(-2)], dim=-1)
             rec_ego_motion = nerf_positional_encoding(rec_ego_motion)
             tgt = self.ego_pose_memory(tgt, rec_ego_motion)
             query_pos = self.ego_pose_pe(query_pos, rec_ego_motion)
-            memory_ego_motion = torch.cat([self.memory_velo, self.memory_timestamp, self.memory_egopose[..., :3, :].flatten(-2)], dim=-1).float()
+            memory_ego_motion = torch.cat(
+                [self.memory_velo, self.memory_timestamp, self.memory_egopose[..., :3, :].flatten(-2)], dim=-1).float()
             memory_ego_motion = nerf_positional_encoding(memory_ego_motion)
             temp_pos = self.ego_pose_pe(temp_pos, memory_ego_motion)
             temp_memory = self.ego_pose_memory(temp_memory, memory_ego_motion)
 
-        query_pos += self.time_embedding(pos2posemb1d(torch.zeros_like(reference_points[...,:1])))
+        query_pos += self.time_embedding(pos2posemb1d(torch.zeros_like(reference_points[..., :1])))
         temp_pos += self.time_embedding(pos2posemb1d(self.memory_timestamp).float())
 
         if self.num_propagated > 0:
             tgt = torch.cat([tgt, temp_memory[:, :self.num_propagated]], dim=1)
             query_pos = torch.cat([query_pos, temp_pos[:, :self.num_propagated]], dim=1)
             reference_points = torch.cat([reference_points, temp_reference_point[:, :self.num_propagated]], dim=1)
-            rec_ego_pose = torch.eye(4, device=query_pos.device).unsqueeze(0).unsqueeze(0).repeat(B, query_pos.shape[1]+self.num_propagated, 1, 1)
+            rec_ego_pose = torch.eye(4, device=query_pos.device).unsqueeze(0).unsqueeze(0).repeat(B, query_pos.shape[
+                1] + self.num_propagated, 1, 1)
             temp_memory = temp_memory[:, self.num_propagated:]
             temp_pos = temp_pos[:, self.num_propagated:]
-            
+
         return tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose
 
     def prepare_for_dn(self, batch_size, reference_points, img_metas):
         if self.training and self.with_dn:
-            targets = [torch.cat((img_meta['gt_bboxes_3d']._data.gravity_center, img_meta['gt_bboxes_3d']._data.tensor[:, 3:]),dim=1) for img_meta in img_metas ]
-            labels = [img_meta['gt_labels_3d']._data for img_meta in img_metas ]
+            targets = [
+                torch.cat((img_meta['gt_bboxes_3d']._data.gravity_center, img_meta['gt_bboxes_3d']._data.tensor[:, 3:]),
+                          dim=1) for img_meta in img_metas]
+            labels = [img_meta['gt_labels_3d']._data for img_meta in img_metas]
             known = [(torch.ones_like(t)).cuda() for t in labels]
             know_idx = known
             unmask_bbox = unmask_label = torch.cat(known)
-            #gt_num
+            # gt_num
             known_num = [t.size(0) for t in targets]
-        
+
             labels = torch.cat([t for t in labels])
             boxes = torch.cat([t for t in targets])
-            batch_idx = torch.cat([torch.full((t.size(0), ), i) for i, t in enumerate(targets)])
-        
+            batch_idx = torch.cat([torch.full((t.size(0),), i) for i, t in enumerate(targets)])
+
             known_indice = torch.nonzero(unmask_label + unmask_bbox)
             known_indice = known_indice.view(-1)
             # add noise
@@ -476,23 +489,26 @@ class StreamPETRHead(AnchorFreeHead):
                 diff = known_bbox_scale / 2 + self.bbox_noise_trans
                 rand_prob = torch.rand_like(known_bbox_center) * 2 - 1.0
                 known_bbox_center += torch.mul(rand_prob,
-                                            diff) * self.bbox_noise_scale
-                known_bbox_center[..., 0:3] = (known_bbox_center[..., 0:3] - self.pc_range[0:3]) / (self.pc_range[3:6] - self.pc_range[0:3])
+                                               diff) * self.bbox_noise_scale
+                known_bbox_center[..., 0:3] = (known_bbox_center[..., 0:3] - self.pc_range[0:3]) / (
+                        self.pc_range[3:6] - self.pc_range[0:3])
 
                 known_bbox_center = known_bbox_center.clamp(min=0.0, max=1.0)
                 mask = torch.norm(rand_prob, 2, 1) > self.split
                 known_labels[mask] = self.num_classes
-            
+
             single_pad = int(max(known_num))
             pad_size = int(single_pad * self.scalar)
             padding_bbox = torch.zeros(pad_size, 3).to(reference_points.device)
-            padded_reference_points = torch.cat([padding_bbox, reference_points], dim=0).unsqueeze(0).repeat(batch_size, 1, 1)
+            padded_reference_points = torch.cat([padding_bbox, reference_points], dim=0).unsqueeze(0).repeat(batch_size,
+                                                                                                             1, 1)
 
             if len(known_num):
                 map_known_indice = torch.cat([torch.tensor(range(num)) for num in known_num])  # [1,2, 1,2,3]
                 map_known_indice = torch.cat([map_known_indice + single_pad * i for i in range(self.scalar)]).long()
             if len(known_bid):
-                padded_reference_points[(known_bid.long(), map_known_indice)] = known_bbox_center.to(reference_points.device)
+                padded_reference_points[(known_bid.long(), map_known_indice)] = known_bbox_center.to(
+                    reference_points.device)
 
             tgt_size = pad_size + self.num_query
             attn_mask = torch.ones(tgt_size, tgt_size).to(reference_points.device) < 0
@@ -507,12 +523,12 @@ class StreamPETRHead(AnchorFreeHead):
                 else:
                     attn_mask[single_pad * i:single_pad * (i + 1), single_pad * (i + 1):pad_size] = True
                     attn_mask[single_pad * i:single_pad * (i + 1), :single_pad * i] = True
-             
+
             # update dn mask for temporal modeling
             query_size = pad_size + self.num_query + self.num_propagated
             tgt_size = pad_size + self.num_query + self.memory_len
             temporal_attn_mask = torch.ones(query_size, tgt_size).to(reference_points.device) < 0
-            temporal_attn_mask[:attn_mask.size(0), :attn_mask.size(1)] = attn_mask 
+            temporal_attn_mask[:attn_mask.size(0), :attn_mask.size(1)] = attn_mask
             temporal_attn_mask[pad_size:, :pad_size] = True
             attn_mask = temporal_attn_mask
 
@@ -524,7 +540,7 @@ class StreamPETRHead(AnchorFreeHead):
                 'know_idx': know_idx,
                 'pad_size': pad_size
             }
-            
+
         else:
             padded_reference_points = reference_points.unsqueeze(0).repeat(batch_size, 1, 1)
             attn_mask = None
@@ -561,9 +577,8 @@ class StreamPETRHead(AnchorFreeHead):
               self)._load_from_state_dict(state_dict, prefix, local_metadata,
                                           strict, missing_keys,
                                           unexpected_keys, error_msgs)
-    
 
-    def forward(self, memory_center, img_metas, topk_indexes=None,  **data):
+    def forward(self, memory_center, img_metas, topk_indexes=None, **data):
         """Forward function.
         Args:
             mlvl_feats (tuple[Tensor]): Features from the upstream
@@ -600,7 +615,8 @@ class StreamPETRHead(AnchorFreeHead):
         tgt = torch.zeros_like(query_pos)
 
         # prepare for the tgt and query_pos using mln.
-        tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose = self.temporal_alignment(query_pos, tgt, reference_points)
+        tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose = self.temporal_alignment(query_pos, tgt,
+                                                                                                        reference_points)
 
         # transformer here is a little different from PETR
         outs_dec, _ = self.transformer(memory, tgt, query_pos, pos_embed, attn_mask, temp_memory, temp_pos)
@@ -623,8 +639,9 @@ class StreamPETRHead(AnchorFreeHead):
 
         all_cls_scores = torch.stack(outputs_classes)
         all_bbox_preds = torch.stack(outputs_coords)
-        all_bbox_preds[..., 0:3] = (all_bbox_preds[..., 0:3] * (self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3])
-        
+        all_bbox_preds[..., 0:3] = (
+                all_bbox_preds[..., 0:3] * (self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3])
+
         # update the memory bank
         self.post_update_memory(data, rec_ego_pose, all_cls_scores, all_bbox_preds, outs_dec, mask_dict)
 
@@ -633,22 +650,22 @@ class StreamPETRHead(AnchorFreeHead):
             output_known_coord = all_bbox_preds[:, :, :mask_dict['pad_size'], :]
             outputs_class = all_cls_scores[:, :, mask_dict['pad_size']:, :]
             outputs_coord = all_bbox_preds[:, :, mask_dict['pad_size']:, :]
-            mask_dict['output_known_lbs_bboxes']=(output_known_class, output_known_coord)
+            mask_dict['output_known_lbs_bboxes'] = (output_known_class, output_known_coord)
             outs = {
                 'all_cls_scores': outputs_class,
                 'all_bbox_preds': outputs_coord,
-                'dn_mask_dict':mask_dict,
+                'dn_mask_dict': mask_dict,
 
             }
         else:
             outs = {
                 'all_cls_scores': all_cls_scores,
                 'all_bbox_preds': all_bbox_preds,
-                'dn_mask_dict':None,
+                'dn_mask_dict': None,
             }
 
         return outs
-    
+
     def prepare_for_loss(self, mask_dict):
         """
         prepare dn components to calculate loss
@@ -666,7 +683,6 @@ class StreamPETRHead(AnchorFreeHead):
             output_known_coord = output_known_coord.permute(1, 2, 0, 3)[(bid, map_known_indice)].permute(1, 0, 2)
         num_tgt = known_indice.numel()
         return known_labels, known_bboxs, output_known_class, output_known_coord, num_tgt
-
 
     def _get_target_single(self,
                            cls_score,
@@ -702,14 +718,14 @@ class StreamPETRHead(AnchorFreeHead):
         # assigner and sampler
 
         assign_result = self.assigner.assign(bbox_pred, cls_score, gt_bboxes,
-                                                gt_labels, gt_bboxes_ignore, self.match_costs, self.match_with_velo)
+                                             gt_labels, gt_bboxes_ignore, self.match_costs, self.match_with_velo)
         sampling_result = self.sampler.sample(assign_result, bbox_pred,
                                               gt_bboxes)
         pos_inds = sampling_result.pos_inds
         neg_inds = sampling_result.neg_inds
 
         # label targets
-        labels = gt_bboxes.new_full((num_bboxes, ),
+        labels = gt_bboxes.new_full((num_bboxes,),
                                     self.num_classes,
                                     dtype=torch.long)
         label_weights = gt_bboxes.new_ones(num_bboxes)
@@ -724,7 +740,7 @@ class StreamPETRHead(AnchorFreeHead):
             bbox_targets[pos_inds] = sampling_result.pos_gt_bboxes
             bbox_weights[pos_inds] = 1.0
             labels[pos_inds] = gt_labels[sampling_result.pos_assigned_gt_inds]
-        return (labels, label_weights, bbox_targets, bbox_weights, 
+        return (labels, label_weights, bbox_targets, bbox_weights,
                 pos_inds, neg_inds)
 
     def get_targets(self,
@@ -771,8 +787,8 @@ class StreamPETRHead(AnchorFreeHead):
 
         (labels_list, label_weights_list, bbox_targets_list,
          bbox_weights_list, pos_inds_list, neg_inds_list) = multi_apply(
-             self._get_target_single, cls_scores_list, bbox_preds_list,
-             gt_labels_list, gt_bboxes_list, gt_bboxes_ignore_list)
+            self._get_target_single, cls_scores_list, bbox_preds_list,
+            gt_labels_list, gt_bboxes_list, gt_bboxes_ignore_list)
         num_total_pos = sum((inds.numel() for inds in pos_inds_list))
         num_total_neg = sum((inds.numel() for inds in neg_inds_list))
         return (labels_list, label_weights_list, bbox_targets_list,
@@ -806,7 +822,7 @@ class StreamPETRHead(AnchorFreeHead):
         cls_scores_list = [cls_scores[i] for i in range(num_imgs)]
         bbox_preds_list = [bbox_preds[i] for i in range(num_imgs)]
         cls_reg_targets = self.get_targets(cls_scores_list, bbox_preds_list,
-                                           gt_bboxes_list, gt_labels_list, 
+                                           gt_bboxes_list, gt_labels_list,
                                            gt_bboxes_ignore_list)
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
          num_total_pos, num_total_neg) = cls_reg_targets
@@ -819,7 +835,7 @@ class StreamPETRHead(AnchorFreeHead):
         cls_scores = cls_scores.reshape(-1, self.cls_out_channels)
         # construct weighted avg_factor to match with the official DETR repo
         cls_avg_factor = num_total_pos * 1.0 + \
-            num_total_neg * self.bg_cls_weight
+                         num_total_neg * self.bg_cls_weight
         if self.sync_cls_avg_factor:
             cls_avg_factor = reduce_mean(
                 cls_scores.new_tensor([cls_avg_factor]))
@@ -840,19 +856,19 @@ class StreamPETRHead(AnchorFreeHead):
         bbox_weights = bbox_weights * self.code_weights
 
         loss_bbox = self.loss_bbox(
-                bbox_preds[isnotnan, :10], normalized_bbox_targets[isnotnan, :10], bbox_weights[isnotnan, :10], avg_factor=num_total_pos)
+            bbox_preds[isnotnan, :10], normalized_bbox_targets[isnotnan, :10], bbox_weights[isnotnan, :10],
+            avg_factor=num_total_pos)
 
         loss_cls = torch.nan_to_num(loss_cls)
         loss_bbox = torch.nan_to_num(loss_bbox)
         return loss_cls, loss_bbox
 
-   
     def dn_loss_single(self,
-                    cls_scores,
-                    bbox_preds,
-                    known_bboxs,
-                    known_labels,
-                    num_total_pos=None):
+                       cls_scores,
+                       bbox_preds,
+                       known_bboxs,
+                       known_labels,
+                       num_total_pos=None):
         """"Loss function for outputs from a single decoder layer of a single
         feature level.
         Args:
@@ -874,7 +890,7 @@ class StreamPETRHead(AnchorFreeHead):
         # classification loss
         cls_scores = cls_scores.reshape(-1, self.cls_out_channels)
         # construct weighted avg_factor to match with the official DETR repo
-        cls_avg_factor = num_total_pos * 3.14159 / 6 * self.split * self.split  * self.split ### positive rate
+        cls_avg_factor = num_total_pos * 3.14159 / 6 * self.split * self.split * self.split  ### positive rate
         if self.sync_cls_avg_factor:
             cls_avg_factor = reduce_mean(
                 cls_scores.new_tensor([cls_avg_factor]))
@@ -896,15 +912,15 @@ class StreamPETRHead(AnchorFreeHead):
 
         bbox_weights = bbox_weights * self.code_weights
 
-        
         loss_bbox = self.loss_bbox(
-                bbox_preds[isnotnan, :10], normalized_bbox_targets[isnotnan, :10], bbox_weights[isnotnan, :10], avg_factor=num_total_pos)
+            bbox_preds[isnotnan, :10], normalized_bbox_targets[isnotnan, :10], bbox_weights[isnotnan, :10],
+            avg_factor=num_total_pos)
 
         loss_cls = torch.nan_to_num(loss_cls)
         loss_bbox = torch.nan_to_num(loss_bbox)
-        
+
         return self.dn_weight * loss_cls, self.dn_weight * loss_bbox
-    
+
     @force_fp32(apply_to=('preds_dicts'))
     def loss(self,
              gt_bboxes_list,
@@ -958,7 +974,7 @@ class StreamPETRHead(AnchorFreeHead):
 
         losses_cls, losses_bbox = multi_apply(
             self.loss_single, all_cls_scores, all_bbox_preds,
-            all_gt_bboxes_list, all_gt_labels_list, 
+            all_gt_bboxes_list, all_gt_labels_list,
             all_gt_bboxes_ignore_list)
 
         loss_dict = dict()
@@ -975,44 +991,44 @@ class StreamPETRHead(AnchorFreeHead):
             loss_dict[f'd{num_dec_layer}.loss_cls'] = loss_cls_i
             loss_dict[f'd{num_dec_layer}.loss_bbox'] = loss_bbox_i
             num_dec_layer += 1
-        
+
         if preds_dicts['dn_mask_dict'] is not None:
-            known_labels, known_bboxs, output_known_class, output_known_coord, num_tgt = self.prepare_for_loss(preds_dicts['dn_mask_dict'])
+            known_labels, known_bboxs, output_known_class, output_known_coord, num_tgt = self.prepare_for_loss(
+                preds_dicts['dn_mask_dict'])
             all_known_bboxs_list = [known_bboxs for _ in range(num_dec_layers)]
             all_known_labels_list = [known_labels for _ in range(num_dec_layers)]
             all_num_tgts_list = [
                 num_tgt for _ in range(num_dec_layers)
             ]
-            
+
             dn_losses_cls, dn_losses_bbox = multi_apply(
                 self.dn_loss_single, output_known_class, output_known_coord,
-                all_known_bboxs_list, all_known_labels_list, 
+                all_known_bboxs_list, all_known_labels_list,
                 all_num_tgts_list)
             loss_dict['dn_loss_cls'] = dn_losses_cls[-1]
             loss_dict['dn_loss_bbox'] = dn_losses_bbox[-1]
             num_dec_layer = 0
             for loss_cls_i, loss_bbox_i in zip(dn_losses_cls[:-1],
-                                            dn_losses_bbox[:-1]):
+                                               dn_losses_bbox[:-1]):
                 loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i
                 loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i
                 num_dec_layer += 1
-                
+
         elif self.with_dn:
             dn_losses_cls, dn_losses_bbox = multi_apply(
                 self.loss_single, all_cls_scores, all_bbox_preds,
-                all_gt_bboxes_list, all_gt_labels_list, 
+                all_gt_bboxes_list, all_gt_labels_list,
                 all_gt_bboxes_ignore_list)
             loss_dict['dn_loss_cls'] = dn_losses_cls[-1].detach()
-            loss_dict['dn_loss_bbox'] = dn_losses_bbox[-1].detach()     
+            loss_dict['dn_loss_bbox'] = dn_losses_bbox[-1].detach()
             num_dec_layer = 0
             for loss_cls_i, loss_bbox_i in zip(dn_losses_cls[:-1],
-                                            dn_losses_bbox[:-1]):
-                loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i.detach()     
-                loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i.detach()     
+                                               dn_losses_bbox[:-1]):
+                loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i.detach()
+                loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i.detach()
                 num_dec_layer += 1
 
         return loss_dict
-
 
     @force_fp32(apply_to=('preds_dicts'))
     def get_bboxes(self, preds_dicts, img_metas, rescale=False):

@@ -9,16 +9,17 @@
 # ------------------------------------------------------------------------
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
+import math
+import random
+
 import numpy as np
+import torch
+from mmcv.parallel import DataContainer as DC
 from mmdet.datasets import DATASETS
 from mmdet3d.datasets import NuScenesDataset
-from mmdet.datasets import DATASETS
-import torch
-import numpy as np
 from nuscenes.eval.common.utils import Quaternion
-from mmcv.parallel import DataContainer as DC
-import random
-import math
+
+
 @DATASETS.register_module()
 class CustomNuScenesDataset(NuScenesDataset):
     r"""NuScenes Dataset.
@@ -26,7 +27,8 @@ class CustomNuScenesDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, collect_keys, seq_mode=False, seq_split_num=1, num_frame_losses=1, queue_length=8, random_length=0, *args, **kwargs):
+    def __init__(self, collect_keys, seq_mode=False, seq_split_num=1, num_frame_losses=1, queue_length=8,
+                 random_length=0, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.queue_length = queue_length
         self.collect_keys = collect_keys
@@ -38,7 +40,7 @@ class CustomNuScenesDataset(NuScenesDataset):
             self.queue_length = 1
             self.seq_split_num = seq_split_num
             self.random_length = 0
-            self._set_sequence_group_flag() # Must be called after load_annotations b/c load_annotations does sorting.
+            self._set_sequence_group_flag()  # Must be called after load_annotations b/c load_annotations does sorting.
 
     def _set_sequence_group_flag(self):
         """
@@ -64,9 +66,9 @@ class CustomNuScenesDataset(NuScenesDataset):
                 curr_new_flag = 0
                 for curr_flag in range(len(bin_counts)):
                     curr_sequence_length = np.array(
-                        list(range(0, 
-                                bin_counts[curr_flag], 
-                                math.ceil(bin_counts[curr_flag] / self.seq_split_num)))
+                        list(range(0,
+                                   bin_counts[curr_flag],
+                                   math.ceil(bin_counts[curr_flag] / self.seq_split_num)))
                         + [bin_counts[curr_flag]])
 
                     for sub_seq_idx in (curr_sequence_length[1:] - curr_sequence_length[:-1]):
@@ -78,7 +80,6 @@ class CustomNuScenesDataset(NuScenesDataset):
                 assert len(np.bincount(new_flags)) == len(np.bincount(self.flag)) * self.seq_split_num
                 self.flag = np.array(new_flags, dtype=np.int64)
 
-
     def prepare_train_data(self, index):
         """
         Training data preparation.
@@ -88,7 +89,7 @@ class CustomNuScenesDataset(NuScenesDataset):
             dict: Training data dict of the corresponding index.
         """
         queue = []
-        index_list = list(range(index-self.queue_length-self.random_length+1, index))
+        index_list = list(range(index - self.queue_length - self.random_length + 1, index))
         random.shuffle(index_list)
         index_list = sorted(index_list[self.random_length:])
         index_list.append(index)
@@ -96,8 +97,8 @@ class CustomNuScenesDataset(NuScenesDataset):
         for i in index_list:
             i = max(0, i)
             input_dict = self.get_data_info(i)
-            
-            if not self.seq_mode: # for sliding window only
+
+            if not self.seq_mode:  # for sliding window only
                 if input_dict['scene_token'] != prev_scene_token:
                     input_dict.update(dict(prev_exists=False))
                     prev_scene_token = input_dict['scene_token']
@@ -111,7 +112,7 @@ class CustomNuScenesDataset(NuScenesDataset):
 
         for k in range(self.num_frame_losses):
             if self.filter_empty_gt and \
-                (queue[-k-1] is None or ~(queue[-k-1]['gt_labels_3d']._data != -1).any()):
+                    (queue[-k - 1] is None or ~(queue[-k - 1]['gt_labels_3d']._data != -1).any()):
                 return None
         return self.union2one(queue)
 
@@ -128,11 +129,12 @@ class CustomNuScenesDataset(NuScenesDataset):
         self.pre_pipeline(input_dict)
         example = self.pipeline(input_dict)
         return example
-        
+
     def union2one(self, queue):
         for key in self.collect_keys:
             if key != 'img_metas':
-                queue[-1][key] = DC(torch.stack([each[key].data for each in queue]), cpu_only=False, stack=True, pad_dims=None)
+                queue[-1][key] = DC(torch.stack([each[key].data for each in queue]), cpu_only=False, stack=True,
+                                    pad_dims=None)
             else:
                 queue[-1][key] = DC([each[key].data for each in queue], cpu_only=True)
         if not self.test_mode:
@@ -173,7 +175,7 @@ class CustomNuScenesDataset(NuScenesDataset):
         l2e_translation = info['lidar2ego_translation']
         e2g_matrix = convert_egopose_to_matrix_numpy(e2g_rotation, e2g_translation)
         l2e_matrix = convert_egopose_to_matrix_numpy(l2e_rotation, l2e_translation)
-        ego_pose =  e2g_matrix @ l2e_matrix # lidar2global
+        ego_pose = e2g_matrix @ l2e_matrix  # lidar2global
 
         ego_pose_inv = invert_matrix_egopose_numpy(ego_pose)
         input_dict = dict(
@@ -181,7 +183,7 @@ class CustomNuScenesDataset(NuScenesDataset):
             pts_filename=info['lidar_path'],
             sweeps=info['sweeps'],
             ego_pose=ego_pose,
-            ego_pose_inv = ego_pose_inv,
+            ego_pose_inv=ego_pose_inv,
             prev_idx=info['prev'],
             next_idx=info['next'],
             scene_token=info['scene_token'],
@@ -211,9 +213,9 @@ class CustomNuScenesDataset(NuScenesDataset):
                 intrinsics.append(viewpad)
                 extrinsics.append(lidar2cam_rt)
                 lidar2img_rts.append(lidar2img_rt)
-                
-            if not self.test_mode: # for seq_mode
-                prev_exists  = not (index == 0 or self.flag[index - 1] != self.flag[index])
+
+            if not self.test_mode:  # for seq_mode
+                prev_exists = not (index == 0 or self.flag[index - 1] != self.flag[index])
             else:
                 prev_exists = None
 
@@ -228,7 +230,7 @@ class CustomNuScenesDataset(NuScenesDataset):
                 ))
         if not self.test_mode:
             annos = self.get_ann_info(index)
-            annos.update( 
+            annos.update(
                 dict(
                     bboxes=info['bboxes2d'],
                     labels=info['labels2d'],
@@ -237,9 +239,8 @@ class CustomNuScenesDataset(NuScenesDataset):
                     bboxes_ignore=info['bboxes_ignore'])
             )
             input_dict['ann_info'] = annos
-            
-        return input_dict
 
+        return input_dict
 
     def __getitem__(self, idx):
         """Get item from infos according to the given index.
@@ -256,6 +257,7 @@ class CustomNuScenesDataset(NuScenesDataset):
                 continue
             return data
 
+
 def invert_matrix_egopose_numpy(egopose):
     """ Compute the inverse transformation of a 4x4 egopose numpy matrix."""
     inverse_matrix = np.zeros((4, 4), dtype=np.float32)
@@ -265,6 +267,7 @@ def invert_matrix_egopose_numpy(egopose):
     inverse_matrix[:3, 3] = -np.dot(rotation.T, translation)
     inverse_matrix[3, 3] = 1.0
     return inverse_matrix
+
 
 def convert_egopose_to_matrix_numpy(rotation, translation):
     transformation_matrix = np.zeros((4, 4), dtype=np.float32)

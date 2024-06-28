@@ -14,8 +14,10 @@ from mmcv.runner import force_fp32, auto_fp16
 from mmdet.models import DETECTORS
 from mmdet3d.core import bbox3d2result
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
+
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 from projects.mmdet3d_plugin.models.utils.misc import locations
+
 
 @DETECTORS.register_module()
 class Petr3D(MVXTwoStageDetector):
@@ -45,10 +47,10 @@ class Petr3D(MVXTwoStageDetector):
                  single_test=False,
                  pretrained=None):
         super(Petr3D, self).__init__(pts_voxel_layer, pts_voxel_encoder,
-                             pts_middle_encoder, pts_fusion_layer,
-                             img_backbone, pts_backbone, img_neck, pts_neck,
-                             pts_bbox_head, img_roi_head, img_rpn_head,
-                             train_cfg, test_cfg, pretrained)
+                                     pts_middle_encoder, pts_fusion_layer,
+                                     img_backbone, pts_backbone, img_neck, pts_neck,
+                                     pts_bbox_head, img_roi_head, img_rpn_head,
+                                     train_cfg, test_cfg, pretrained)
         self.grid_mask = GridMask(True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
         self.prev_scene_token = None
@@ -60,7 +62,6 @@ class Petr3D(MVXTwoStageDetector):
         self.position_level = position_level
         self.aux_2d_only = aux_2d_only
         self.test_flag = False
-
 
     def extract_img_feat(self, img, len_queue=1, training_mode=False):
         """Extract features of images."""
@@ -87,13 +88,11 @@ class Petr3D(MVXTwoStageDetector):
 
         BN, C, H, W = img_feats[self.position_level].size()
         if self.training or training_mode:
-            img_feats_reshaped = img_feats[self.position_level].view(B, len_queue, int(BN/B / len_queue), C, H, W)
+            img_feats_reshaped = img_feats[self.position_level].view(B, len_queue, int(BN / B / len_queue), C, H, W)
         else:
-            img_feats_reshaped = img_feats[self.position_level].view(B, int(BN/B/len_queue), C, H, W)
-
+            img_feats_reshaped = img_feats[self.position_level].view(B, int(BN / B / len_queue), C, H, W)
 
         return img_feats_reshaped
-
 
     @auto_fp16(apply_to=('img'), out_fp32=True)
     def extract_feat(self, img, T, training_mode=False):
@@ -102,15 +101,15 @@ class Petr3D(MVXTwoStageDetector):
         return img_feats
 
     def obtain_history_memory(self,
-                            gt_bboxes_3d=None,
-                            gt_labels_3d=None,
-                            gt_bboxes=None,
-                            gt_labels=None,
-                            img_metas=None,
-                            centers2d=None,
-                            depths=None,
-                            gt_bboxes_ignore=None,
-                            **data):
+                              gt_bboxes_3d=None,
+                              gt_labels_3d=None,
+                              gt_bboxes=None,
+                              gt_labels=None,
+                              img_metas=None,
+                              centers2d=None,
+                              depths=None,
+                              gt_bboxes_ignore=None,
+                              **data):
         losses = dict()
         T = data['img'].size(1)
         num_nograd_frames = T - self.num_frame_head_grads
@@ -120,7 +119,7 @@ class Petr3D(MVXTwoStageDetector):
             return_losses = False
             data_t = dict()
             for key in data:
-                data_t[key] = data[key][:, i] 
+                data_t[key] = data[key][:, i]
 
             data_t['img_feats'] = data_t['img_feats']
             if i >= num_nograd_frames:
@@ -128,28 +127,27 @@ class Petr3D(MVXTwoStageDetector):
             if i >= num_grad_losses:
                 return_losses = True
             loss = self.forward_pts_train(gt_bboxes_3d[i],
-                                        gt_labels_3d[i], gt_bboxes[i],
-                                        gt_labels[i], img_metas[i], centers2d[i], depths[i], requires_grad=requires_grad,return_losses=return_losses,**data_t)
+                                          gt_labels_3d[i], gt_bboxes[i],
+                                          gt_labels[i], img_metas[i], centers2d[i], depths[i],
+                                          requires_grad=requires_grad, return_losses=return_losses, **data_t)
             if loss is not None:
                 for key, value in loss.items():
-                    losses['frame_'+str(i)+"_"+key] = value
+                    losses['frame_' + str(i) + "_" + key] = value
         return losses
-
 
     def prepare_location(self, img_metas, **data):
         pad_h, pad_w, _ = img_metas[0]['pad_shape'][0]
         bs, n = data['img_feats'].shape[:2]
         x = data['img_feats'].flatten(0, 1)
-        location = locations(x, self.stride, pad_h, pad_w)[None].repeat(bs*n, 1, 1, 1)
+        location = locations(x, self.stride, pad_h, pad_w)[None].repeat(bs * n, 1, 1, 1)
         return location
 
     def forward_roi_head(self, location, **data):
         if (self.aux_2d_only and not self.training) or not self.with_img_roi_head:
-            return {'topk_indexes':None}
+            return {'topk_indexes': None}
         else:
             outs_roi = self.img_roi_head(location, **data)
             return outs_roi
-
 
     def forward_pts_train(self,
                           gt_bboxes_3d,
@@ -194,7 +192,7 @@ class Petr3D(MVXTwoStageDetector):
             if self.with_img_roi_head:
                 loss2d_inputs = [gt_bboxes, gt_labels, centers2d, depths, outs_roi, img_metas]
                 losses2d = self.img_roi_head.loss(*loss2d_inputs)
-                losses.update(losses2d) 
+                losses.update(losses2d)
 
             return losses
         else:
@@ -251,7 +249,7 @@ class Petr3D(MVXTwoStageDetector):
         Returns:
             dict: Losses of different branches.
         """
-        if self.test_flag: #for interval evaluation
+        if self.test_flag:  # for interval evaluation
             self.pts_bbox_head.reset_memory()
             self.test_flag = False
 
@@ -261,22 +259,21 @@ class Petr3D(MVXTwoStageDetector):
         rec_img = data['img'][:, -self.num_frame_backbone_grads:]
         rec_img_feats = self.extract_feat(rec_img, self.num_frame_backbone_grads)
 
-        if T-self.num_frame_backbone_grads > 0:
+        if T - self.num_frame_backbone_grads > 0:
             self.eval()
             with torch.no_grad():
-                prev_img_feats = self.extract_feat(prev_img, T-self.num_frame_backbone_grads, True)
+                prev_img_feats = self.extract_feat(prev_img, T - self.num_frame_backbone_grads, True)
             self.train()
             data['img_feats'] = torch.cat([prev_img_feats, rec_img_feats], dim=1)
         else:
             data['img_feats'] = rec_img_feats
 
         losses = self.obtain_history_memory(gt_bboxes_3d,
-                        gt_labels_3d, gt_bboxes,
-                        gt_labels, img_metas, centers2d, depths, gt_bboxes_ignore, **data)
+                                            gt_labels_3d, gt_bboxes,
+                                            gt_labels, img_metas, centers2d, depths, gt_bboxes_ignore, **data)
 
         return losses
-  
-  
+
     def forward_test(self, img_metas, rescale, **data):
         self.test_flag = True
         for var, name in [(img_metas, 'img_metas')]:
@@ -311,7 +308,7 @@ class Petr3D(MVXTwoStageDetector):
             for bboxes, scores, labels in bbox_list
         ]
         return bbox_results
-    
+
     def simple_test(self, img_metas, **data):
         """Test function without augmentaiton."""
         data['img_feats'] = self.extract_img_feat(data['img'], 1)
@@ -322,5 +319,3 @@ class Petr3D(MVXTwoStageDetector):
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
         return bbox_list
-
-    

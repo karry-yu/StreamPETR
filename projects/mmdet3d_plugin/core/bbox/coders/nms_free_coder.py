@@ -1,7 +1,7 @@
 import torch
-
 from mmdet.core.bbox import BaseBBoxCoder
 from mmdet.core.bbox.builder import BBOX_CODERS
+
 from projects.mmdet3d_plugin.core.bbox.util import denormalize_bbox
 
 
@@ -25,7 +25,7 @@ class NMSFreeCoder(BaseBBoxCoder):
                  max_num=100,
                  score_threshold=None,
                  num_classes=10):
-        
+
         self.pc_range = pc_range
         self.voxel_size = voxel_size
         self.post_center_range = post_center_range
@@ -56,16 +56,16 @@ class NMSFreeCoder(BaseBBoxCoder):
         bbox_index = torch.div(indexs, self.num_classes, rounding_mode='floor')
         bbox_preds = bbox_preds[bbox_index]
 
-        final_box_preds = denormalize_bbox(bbox_preds, self.pc_range)   
-        final_scores = scores 
-        final_preds = labels 
+        final_box_preds = denormalize_bbox(bbox_preds, self.pc_range)
+        final_scores = scores
+        final_preds = labels
 
         # use score threshold
         if self.score_threshold is not None:
             thresh_mask = final_scores >= self.score_threshold
         if self.post_center_range is not None:
             self.post_center_range = torch.tensor(self.post_center_range, device=scores.device)
-            
+
             mask = (final_box_preds[..., :3] >=
                     self.post_center_range[:3]).all(1)
             mask &= (final_box_preds[..., :3] <=
@@ -103,7 +103,7 @@ class NMSFreeCoder(BaseBBoxCoder):
         """
         all_cls_scores = preds_dicts['all_cls_scores'][-1]
         all_bbox_preds = preds_dicts['all_bbox_preds'][-1]
-        
+
         batch_size = all_cls_scores.size()[0]
         predictions_list = []
         for i in range(batch_size):

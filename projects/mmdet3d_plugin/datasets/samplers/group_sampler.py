@@ -5,17 +5,17 @@
 # ---------------------------------------------
 #  Modified by Shihao Wang
 # ---------------------------------------------
-import math
-import itertools
 import copy
-import torch.distributed as dist
+import itertools
+import math
+
 import numpy as np
 import torch
+import torch.distributed as dist
 from mmcv.runner import get_dist_info
 from torch.utils.data import Sampler
+
 from .sampler import SAMPLER
-import random
-from IPython import embed
 
 
 @SAMPLER.register_module()
@@ -135,7 +135,7 @@ def sync_random_seed(seed=None, device='cuda'):
         int: Seed to be used.
     """
     if seed is None:
-        seed = np.random.randint(2**31)
+        seed = np.random.randint(2 ** 31)
     assert isinstance(seed, int)
 
     rank, num_replicas = get_dist_info()
@@ -150,6 +150,7 @@ def sync_random_seed(seed=None, device='cuda'):
     dist.broadcast(random_num, src=0)
     return random_num.item()
 
+
 @SAMPLER.register_module()
 class InfiniteGroupEachSampleInBatchSampler(Sampler):
     """
@@ -159,7 +160,7 @@ class InfiniteGroupEachSampleInBatchSampler(Sampler):
     Shuffling is only done for group order, not done within groups.
     """
 
-    def __init__(self, 
+    def __init__(self,
                  dataset,
                  samples_per_gpu=1,
                  num_replicas=None,
@@ -190,14 +191,14 @@ class InfiniteGroupEachSampleInBatchSampler(Sampler):
         # Now, for efficiency, make a dict group_idx: List[dataset sample_idxs]
         self.group_idx_to_sample_idxs = {
             group_idx: np.where(self.flag == group_idx)[0].tolist()
-            for group_idx in range(self.groups_num)}        
+            for group_idx in range(self.groups_num)}
 
         # Get a generator per sample idx. Considering samples over all
         # GPUs, each sample position has its own generator 
         self.group_indices_per_global_sample_idx = [
-            self._group_indices_per_global_sample_idx(self.rank * self.batch_size + local_sample_idx) 
+            self._group_indices_per_global_sample_idx(self.rank * self.batch_size + local_sample_idx)
             for local_sample_idx in range(self.batch_size)]
-        
+
         # Keep track of a buffer of dataset sample idxs for each local sample idx
         self.buffer_per_local_sample = [[] for _ in range(self.batch_size)]
 
@@ -208,8 +209,8 @@ class InfiniteGroupEachSampleInBatchSampler(Sampler):
             yield from torch.randperm(self.groups_num, generator=g).tolist()
 
     def _group_indices_per_global_sample_idx(self, global_sample_idx):
-        yield from itertools.islice(self._infinite_group_indices(), 
-                                    global_sample_idx, 
+        yield from itertools.islice(self._infinite_group_indices(),
+                                    global_sample_idx,
                                     None,
                                     self.global_batch_size)
 
@@ -225,12 +226,12 @@ class InfiniteGroupEachSampleInBatchSampler(Sampler):
                             self.group_idx_to_sample_idxs[new_group_idx])
 
                 curr_batch.append(self.buffer_per_local_sample[local_sample_idx].pop(0))
-            
+
             yield curr_batch
 
     def __len__(self):
         """Length of base dataset."""
         return self.size
-        
+
     def set_epoch(self, epoch):
         self.epoch = epoch

@@ -7,9 +7,9 @@
 #  Modified by Shihao Wang
 # ------------------------------------------------------------------------
 import math
+
 import torch
-import torch.nn as nn 
-import numpy as np
+
 
 def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):
     scale = 2 * math.pi
@@ -25,6 +25,7 @@ def pos2posemb3d(pos, num_pos_feats=128, temperature=10000):
     posemb = torch.cat((pos_y, pos_x, pos_z), dim=-1)
     return posemb
 
+
 def pos2posemb1d(pos, num_pos_feats=256, temperature=10000):
     scale = 2 * math.pi
     pos = pos * scale
@@ -36,8 +37,9 @@ def pos2posemb1d(pos, num_pos_feats=256, temperature=10000):
 
     return pos_x
 
+
 def nerf_positional_encoding(
-    tensor, num_encoding_functions=6, include_input=False, log_sampling=True
+        tensor, num_encoding_functions=6, include_input=False, log_sampling=True
 ) -> torch.Tensor:
     r"""Apply positional encoding to the input.
     Args:

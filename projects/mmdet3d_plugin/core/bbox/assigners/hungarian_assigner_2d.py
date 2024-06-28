@@ -3,12 +3,11 @@
 #  Modified by Shihao Wang
 # ---------------------------------------------
 import torch
-
-from mmdet.core.bbox.builder import BBOX_ASSIGNERS
+from mmdet.core import bbox_cxcywh_to_xyxy
 from mmdet.core.bbox.assigners import AssignResult
 from mmdet.core.bbox.assigners import BaseAssigner
+from mmdet.core.bbox.builder import BBOX_ASSIGNERS
 from mmdet.core.bbox.match_costs import build_match_cost
-from mmdet.core import bbox_cxcywh_to_xyxy
 
 try:
     from scipy.optimize import linear_sum_assignment
@@ -103,10 +102,10 @@ class HungarianAssigner2D(BaseAssigner):
         num_gts, num_bboxes = gt_bboxes.size(0), bbox_pred.size(0)
 
         # 1. assign -1 by default
-        assigned_gt_inds = bbox_pred.new_full((num_bboxes, ),
+        assigned_gt_inds = bbox_pred.new_full((num_bboxes,),
                                               -1,
                                               dtype=torch.long)
-        assigned_labels = bbox_pred.new_full((num_bboxes, ),
+        assigned_labels = bbox_pred.new_full((num_bboxes,),
                                              -1,
                                              dtype=torch.long)
         if num_gts == 0 or num_bboxes == 0:
