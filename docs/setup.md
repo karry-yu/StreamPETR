@@ -49,3 +49,18 @@ cd mmdetection3d
 git checkout v1.0.0rc6 
 pip install -e .
 ```
+
+**f. For my env**
+
+```shell
+# for numba==0.53.0 https://github.com/open-mmlab/mmdetection3d/pull/2416
+pip install "numpy<1.24.0"
+# https://github.com/open-mmlab/mmdetection/issues/10962
+pip install yapf==0.40.1
+pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 --extra-index-url https://download.pytorch.org/whl/cu116
+
+pip install "mmcv-full>=1.5.2,<=1.7.0" -f https://download.openmmlab.com/mmcv/dist/cu116/torch1.13/index.html
+pip install mmdet==2.28.2
+pip install mmsegmentation==0.30.0
+pip install mmdet3d==1.0.0rc6
+```
