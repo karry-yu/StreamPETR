@@ -8,7 +8,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from flash_attn.bert_padding import unpad_input
-from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
+# from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
+from flash_attn.flash_attn_interface import flash_attn_varlen_kvpacked_func as flash_attn_unpadded_kvpacked_func
 from mmcv.runner import auto_fp16
 from torch.nn.functional import linear
 from torch.nn.init import (

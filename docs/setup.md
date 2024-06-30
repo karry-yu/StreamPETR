@@ -63,4 +63,9 @@ pip install "mmcv-full>=1.5.2,<=1.7.0" -f https://download.openmmlab.com/mmcv/di
 pip install mmdet==2.28.2
 pip install mmsegmentation==0.30.0
 pip install mmdet3d==1.0.0rc6
+
+pip install einops
+# flash-att does not support v100, but I installed it anyway to minimize code changes.
+wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.3.5/flash_attn-2.3.5+cu116torch1.13cxx11abiFALSE-cp38-cp38-linux_x86_64.whl
+pip install flash_attn-2.3.5+cu116torch1.13cxx11abiFALSE-cp38-cp38-linux_x86_64.whl
 ```
