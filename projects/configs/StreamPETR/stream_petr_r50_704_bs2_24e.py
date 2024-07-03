@@ -1,3 +1,25 @@
+# mAP: 0.3804
+# mATE: 0.6890
+# mASE: 0.2721
+# mAOE: 0.6140
+# mAVE: 0.2887
+# mAAE: 0.2130
+# NDS: 0.4825
+# Eval time: 111.0s
+# Per-class results:
+# Object Class            AP      ATE     ASE     AOE     AVE     AAE
+# car                     0.576   0.469   0.153   0.107   0.274   0.207
+# truck                   0.356   0.704   0.211   0.170   0.204   0.192
+# bus                     0.324   0.863   0.216   0.110   0.582   0.300
+# trailer                 0.105   1.101   0.247   0.647   0.197   0.143
+# construction_vehicle    0.100   1.008   0.483   1.194   0.115   0.400
+# pedestrian              0.436   0.693   0.286   0.651   0.389   0.200
+# motorcycle              0.370   0.616   0.277   1.029   0.375   0.254
+# bicycle                 0.387   0.537   0.258   1.439   0.173   0.008
+# traffic_cone            0.578   0.443   0.315   nan     nan     nan
+# barrier                 0.570   0.456   0.276   0.178   nan     nan
+
+
 _base_ = [
     '../_base_/datasets/nus-3d.py',
     '../_base_/default_runtime.py'
@@ -38,7 +60,8 @@ model = dict(
     num_frame_losses=num_frame_losses,
     use_grid_mask=True,
     img_backbone=dict(
-        pretrained='torchvision://resnet50',
+        # pretrained='torchvision://resnet50',
+        pretrained='./Checkpoints/torch/hub/checkpoints/resnet50-0676ba61.pth',
         type='ResNet',
         depth=50,
         num_stages=4,
